@@ -1,0 +1,199 @@
+---
+title: "Sociology Abstracts"
+format: html
+editor: visual
+toc: TRUE
+code-tools: TRUE
+code-fold: TRUE
+embed-resources: TRUE
+---
+
+## Setup
+
+Load data from proquest on 2020-2024-02-01 sociology department dissertations in English. Clean and tokenise as 2-skip-1 ngrams
+
+```{r setup, include=FALSE}
+library("tidyverse", quietly=TRUE, warn.conflicts=FALSE)
+library("magrittr",include.only="%<>%", quietly=TRUE, warn.conflicts=FALSE)
+library("tidytext", quietly=TRUE, warn.conflicts=FALSE)
+requireNamespace("textstem")
+requireNamespace("plotly")
+requireNamespace("DT")
+requireNamespace("ggwordcloud")
+requireNamespace("reshape2")
+requireNamespace("topicmodels")
+```
+
+```{r, load-abs}
+abs1.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.xls")
+abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
+abs.df <- bind_rows(abs1.df, abs2.df)
+rm("abs1.df","abs2.df")
+```
+
+```{r tokenize}
+mystop<-c("i.e","ie","e.g","eg","u.", as.character(1:100))
+
+abs_tidy.df <-  abs.df %>%
+  select(isbn,Abstract) %>%
+  mutate(Clean_Abstract=Abstract) %>%  
+    mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "U\\.S\\.","USA")) %>%
+  mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "[-\\)\\(\\&\"/]"," ")) %>%
+  mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "[^a-zA-Z \\.]", ""))  %>% 
+  mutate(Clean_Abstract=str_squish(Clean_Abstract)) %>% 
+  unnest_tokens(ngram, "Clean_Abstract", token = "skip_ngrams", n = 2,k=1,
+                stopwords=c(get_stopwords()[["word"]], mystop)) %>%
+  mutate(ngram = textstem::stem_strings(ngram)) %>%
+  mutate(ngram = str_squish(ngram)) %>% 
+  filter(!str_detect(ngram,"\\.")) %>%
+  filter(ngram!="")
+
+rm(mystop)
+```
+
+# Corpus-Level Characteristics
+
+## Word and Phrase Frequencies
+
+```{r corpus-frequencies}
+abs_ngram_freq.df <-abs_tidy.df %>% 
+  count(ngram,sort=TRUE)
+```
+
+```{r frequencies-plots}
+
+suppressWarnings(
+  (
+    abs_ngram_freq.df %>%
+      ggplot(aes(x = n)) + geom_histogram(bins = 100) + scale_y_log10()
+  ) %>% plotly::ggplotly()
+)
+
+  
+  abs_ngram_freq.df %>%
+    filter(str_detect(ngram, " ")) %>%
+    arrange(desc(n)) %>%
+    slice_head(n = 1000) %>%
+    DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv'))
+    )
+  
+  abs_ngram_freq.df  %>% 
+    arrange(desc(n)) %>%
+    slice_head(n = 1000) %>%
+    DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv'))
+    )
+
+```
+
+## Obligatory Wordclouds
+
+```{r wordclouds }
+    abs_ngram_freq.df  %>% arrange(desc(n)) %>%
+          filter(str_detect(ngram, " ")) %>%
+      slice_head(n=250) %>%
+      rename(freq=n,word=ngram) %>%
+      ggwordcloud::ggwordcloud2( size=.8)
+
+```
+
+```{r wordcloud2}
+    
+    abs_ngram_freq.df  %>% arrange(desc(n)) %>%
+      slice_head(n=250) %>%
+      rename(freq=n,word=ngram) %>%
+      ggwordcloud::ggwordcloud2(size=.9)
+```
+
+```{r}
+
+```
+
+# Dissertation Characteristics
+
+## Terms
+
+```{r absfreq}
+abs_doc_freq.df <-
+  abs_tidy.df %>% 
+  count(ngram,isbn) %>% 
+  bind_tf_idf(ngram,isbn,n)
+
+ngram_count.df <- abs_doc_freq.df %>% 
+  group_by(ngram) %>%
+  summarize(num_dissertation=n())
+
+suppressWarnings(
+  (
+    ngram_count.df %>%
+      ggplot(aes(x = num_dissertation)) + geom_histogram(bins = 100) + scale_y_log10()
+  ) %>% plotly::ggplotly()
+)
+
+ngram_count.df %>% 
+  filter(num_dissertation > dim(abs.df)[[1]] *.05, 
+         num_dissertation < dim(abs.df)[[1]] *.5  )  %>%
+  mutate(percent_dissertation=round(num_dissertation/dim(abs.df)[[1]],digits=2)) %>%
+  select(ngram,percent_dissertation) %>%
+  arrange(desc(percent_dissertation)) -> core_ngrams.df
+
+  core_ngrams.df %>% 
+   DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption = "ngrams appearing in at least 5% & less than 50% of dissertations"
+    )
+
+
+abs_doc_freq.df %>% 
+  group_by(isbn) %>%
+  arrange(desc(tf_idf), .by_group=TRUE) %>% 
+  slice_head(n=1) %>%
+  ungroup() %>%
+  arrange(desc(tf_idf)) %>%
+   DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption = "each dissertation abstract's most distinctive word or phrase"
+    )
+
+```
+
+## Topics
+
+```{r LDA}
+
+core_dtm <- 
+  left_join( core_ngrams.df %>% select(ngram), abs_doc_freq.df, 
+             by=join_by(ngram)) %>%
+  select(ngram,isbn,n) %>%
+  rename(term=ngram, document=isbn, value=n) %>%
+  cast_dtm(term=term,document=document,value=value)
+
+LDA.res <- topicmodels::LDA(x = core_dtm, k =20)
+
+LDA.topics <- tidy(LDA.res, matrix = "beta")
+LDA_top_terms <- LDA.topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 5) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+LDA_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
