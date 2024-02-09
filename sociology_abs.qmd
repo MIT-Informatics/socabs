@@ -181,7 +181,7 @@ core_dtm <-
   rename(term=ngram, document=isbn, value=n) %>%
   cast_dtm(term=term,document=document,value=value)
 
-LDA.res <- topicmodels::LDA(x = core_dtm, k =20)
+LDA.res <- topicmodels::LDA(x = core_dtm, k =20, method="Gibbs")
 
 LDA.topics <- tidy(LDA.res, matrix = "beta")
 LDA_top_terms <- LDA.topics %>%
@@ -196,4 +196,71 @@ LDA_top_terms %>%
   geom_col(show.legend = FALSE) +
   facet_wrap(~ topic, scales = "free") +
   scale_y_reordered()
+```
+
+```{r}
+
+# using textmineR
+
+core_sparse <- 
+  left_join( core_ngrams.df %>% select(ngram), abs_doc_freq.df, 
+             by=join_by(ngram)) %>%
+  select(ngram,isbn,n) %>%
+  rename(term=ngram, document=isbn, value=n)%>%
+  cast_sparse(row=document,column=term,value=value)
+
+LDA.res.tm <- 
+  textmineR::FitLdaModel(dtm = core_sparse, 
+                 k = 20,
+                 iterations = 200,
+                 burnin = 175)
+
+LDA.res <- topicmodels::LDA(x = core_dtm, k =20)
+
+tidy.lda_topic_model <-function(x, matrix="beta") {
+  
+  if (matrix=="beta") {
+    res  <- data.frame(topic = as.integer(stringr::str_replace_all(rownames(x$phi), "t_", "")), 
+                        x$phi, 
+                        stringsAsFactors = FALSE) %>%
+  gather(term, beta, -topic) %>% 
+  tibble::as_tibble()
+    
+  } else {
+    res <- data.frame(document = rownames(x$theta),
+                         x$theta,
+                         stringsAsFactors = FALSE) %>%
+  gather(topic, gamma, -document) %>%
+  tibble::as_tibble()
+  }
+  res
+}
+
+LDA.topics <- tidy(LDA.res.tm, matrix = "beta")
+LDA_top_terms <- LDA.topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 5) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+LDA_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+```{r}
+# document cluster
+LDA.docs <-  tidy(LDA.res.tm, matrix = "gamma")
+
+LDA_top_topics <- LDA.docs %>%
+  group_by(document) %>%
+  slice_max(gamma, n = 3) %>% 
+  ungroup() %>%
+  arrange(document, -gamma)
+
+
+
 ```
