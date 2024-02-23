@@ -13,6 +13,8 @@ embed-resources: TRUE
 Load data from proquest on 2020-2024-02-01 sociology department dissertations in English. Clean and tokenise as 2-skip-1 ngrams
 
 ```{r setup, include=FALSE}
+rm(list=ls())
+set.seed(seed=NULL)
 library("tidyverse", quietly=TRUE, warn.conflicts=FALSE)
 library("magrittr",include.only="%<>%", quietly=TRUE, warn.conflicts=FALSE)
 library("tidytext", quietly=TRUE, warn.conflicts=FALSE)
@@ -112,7 +114,13 @@ suppressWarnings(
       ggwordcloud::ggwordcloud2(size=.9)
 ```
 
-```{r}
+```{r keword-wordcloud}
+abs.df %>% pull(identifierKeywords) %>% str_split(patter=",") %>% unlist() %>% str_squish() %>% as_tibble() %>% count(value, sort=TRUE) -> keyword_freq.df
+
+keyword_freq.df  %>% arrange(desc(n)) %>%
+      slice_head(n=250) %>%
+      rename(freq=n,word=value) %>%
+      ggwordcloud::ggwordcloud2(size=.9) 
 
 ```
 
@@ -198,7 +206,7 @@ LDA_top_terms %>%
   scale_y_reordered()
 ```
 
-```{r}
+```{r LDA-v2}
 
 # using textmineR
 
@@ -251,16 +259,29 @@ LDA_top_terms %>%
   scale_y_reordered()
 ```
 
-```{r}
+```{r topic-cluster}
 # document cluster
 LDA.docs <-  tidy(LDA.res.tm, matrix = "gamma")
 
+LDA.docs %<>% left_join(by=c("document"="isbn"), 
+                        abs.df %>% select(isbn,Title))
+
 LDA_top_topics <- LDA.docs %>%
-  group_by(document) %>%
-  slice_max(gamma, n = 3) %>% 
+  group_by(topic) %>%
+  slice_max(gamma, n = 5) %>% 
   ungroup() %>%
   arrange(document, -gamma)
 
-
-
+LDA_top_topics %>%
+   arrange(topic) %>% 
+   select(-document) %>%
+   DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption = "each dissertation abstract's most distinctive word or phrase"
+    )
 ```
+
+# Gender
