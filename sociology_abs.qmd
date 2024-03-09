@@ -13,7 +13,6 @@ embed-resources: TRUE
 Load data from proquest on 2020-2024-02-01 sociology department dissertations in English. Clean and tokenise as 2-skip-1 ngrams
 
 ```{r setup, include=FALSE}
-rm(list=ls())
 set.seed(seed=NULL)
 library("tidyverse", quietly=TRUE, warn.conflicts=FALSE)
 library("magrittr",include.only="%<>%", quietly=TRUE, warn.conflicts=FALSE)
@@ -34,7 +33,23 @@ rm("abs1.df","abs2.df")
 ```
 
 ```{r tokenize}
-mystop<-c("i.e","ie","e.g","eg","u.", as.character(1:100))
+mystop<-c("i.e","ie","e.g","eg","u.", as.character(1:100),
+      "a", "about", "above", "after", "again",  
+"am", "an", "and", "any", "are", "aren't", "as", "at", "be", 
+"because", "been", "before", "being", "below", "between", "both", 
+"but", "by", 
+"do", "does", "doing", "don't", "during", 
+"each",  "for", "from", "had", "hadn't", "has", 
+"hasn't", "have", "haven't", "having", "he", "he'd", "he'll", 
+"he's", "her", "here", "here's", "hers", "herself", "him", "himself", 
+"his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", 
+"in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "no", "nor", 
+"not", "of", "off", "on", "or", "ought", 
+"our", "ours", "ourselves", "out", "over", "own", "same", "shan't", 
+"so",  "such", "than", "that", "that's", "the", "this", "those", "through", 
+"to", "too", "under", "until", "up", "very", "was", "wasn't",  "where", "where's", "which")
+
+other_stop <- get_stopwords()[["word"]]
 
 abs_tidy.df <-  abs.df %>%
   select(isbn,Abstract) %>%
@@ -44,13 +59,276 @@ abs_tidy.df <-  abs.df %>%
   mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "[^a-zA-Z \\.]", ""))  %>% 
   mutate(Clean_Abstract=str_squish(Clean_Abstract)) %>% 
   unnest_tokens(ngram, "Clean_Abstract", token = "skip_ngrams", n = 2,k=1,
-                stopwords=c(get_stopwords()[["word"]], mystop)) %>%
-  mutate(ngram = textstem::stem_strings(ngram)) %>%
+                stopwords=mystop)  %>%
+  #mutate(ngram = textstem::stem_strings(ngram, language="english")) %>%
   mutate(ngram = str_squish(ngram)) %>% 
   filter(!str_detect(ngram,"\\.")) %>%
   filter(ngram!="")
 
-rm(mystop)
+rm(mystop,other_stop)
+```
+
+```{r denoise}
+
+
+stop_ngrams <- c( 
+"associated with", 
+"interviews with",  
+"these findings", 
+"with their", 
+"my dissertation",
+"first chapter",
+"second chapter", 
+"empirical chapter", 
+"my research", 
+"depth with", 
+"my findings",
+"dissertation three", 
+"et al",
+"chapter examines",
+"third chapter", 
+"three studies",
+"their with", 
+"with social",  
+"with other", 
+"interactions with",
+"taken together", 
+"empirical chapters",
+"my study", 
+"they also", 
+"women who",
+"who were", 
+"findings study", 
+"people who", 
+"relationships with", 
+"study examines", 
+"these results", 
+"their their", 
+"these studies", 
+"they were", 
+"attitudes toward", 
+"since s", 
+"these suggest", 
+"three papers", 
+"women with", 
+"along with", 
+"these two",
+"with more", 
+"dissertation examine", 
+"students their",  
+"their identities", 
+"chapter explores", 
+"their health", 
+"their parents", 
+"were likely", 
+"with these", 
+"chapter two", 
+"chapter uses",
+"their counterparts",
+"with lower",  
+"structured with", 
+"students with", 
+"study explores", 
+"these three", 
+"together these", 
+"health health", 
+"students who",
+"th century", 
+"their identity",
+"third study",
+"also find",
+"chapter three", 
+"across three", 
+"all three", 
+"chapter examine",
+"one another", 
+"previous research", 
+"second paper", 
+"were with", 
+"first paper", 
+"final chapter", 
+"with focus", 
+"study also", 
+"with mental", 
+"with parents", 
+"with women", 
+"women their", 
+"social social", 
+"within context", 
+"individuals with", 
+"other hand", 
+"other social",  
+"following questions", 
+"three questions", 
+"individuals who", 
+"third paper", 
+"three distinct",
+"while also", 
+"with high", 
+"address these", 
+"children with", 
+"conducted with",
+"dissertation social", 
+"existing literature", 
+"health among", 
+"results study", 
+"their communities", 
+"there little", 
+"what call", 
+"who their", 
+"with family", 
+"among women", 
+"different social", 
+"experiences their", 
+"findings dissertation", 
+"research also", 
+"study examine", 
+"their political", 
+"these factors", 
+"they navigate", 
+"with black", 
+"with data", 
+"with levels", 
+"with one", 
+"women more",
+"engagement with",
+"finally chapter", 
+"level factors", 
+"little known", 
+"men who", 
+"more their", 
+"with racial", 
+"adults with",
+"data with",
+"dissertation two", 
+"engage with",
+"more specifically",
+"study social", 
+"with different", 
+"with health", 
+"chapter four", 
+"cope with", 
+"different types",
+"existing research", 
+"one most", 
+"parents their",
+"social dissertation", 
+"their they", 
+"these changes", 
+"these processes", 
+"were conducted", 
+"who with", 
+"with illness", 
+"with people", 
+"among older", 
+"contributes understanding", 
+"current study", 
+"interact with", 
+"late s",
+"overall dissertation", 
+"people their", 
+"prior research", 
+"their family", "their status", "them their", "they with", "vary across", 
+"what they", "with who", "across different", 
+"across united", "chapter analyzes", "data study", 
+"however these", "level data", 
+"research question", 
+"study uses", "support their", 
+"these experiences", "these were", "within their", "work with", 
+ "based their",  "chapter investigates", 
+ "different groups", "early s", 
+  "first examine", 
+"individuals their",
+"methods approach", 
+"months ethnographic", 
+"months fieldwork", 
+"their experience", "their relationships", 
+"third empirical", 
+"with political", "with students", "years ethnographic", "across all", 
+"across groups", "among adults", "children their", 
+"different ways", "dissertation with", "impact their", "research social", 
+"shape their", "there research", "these data", "using methods", 
+"were associated",  "association with", 
+ "even when", "examine social", "few studies", "findings also", 
+"first two", 
+"relationships their", "sense their", 
+"their these", "these can", "they can", 
+"were less", 
+"with greater", "with increased", "chapter dissertation", 
+"conclude with", 
+"dissertation research", "dissertation use", "questions what", 
+"three different", "three dissertation", 
+"two different", "with non",
+"within social", "women were",  
+ "implications research", "mid s", "positively with", 
+ "st century", "study chapter", "study three", 
+ "these analyses",  "were used", "what extent", "while research", 
+"with implications", "with low", "with self", 
+"work their",  "other words",  "research with", 
+ "their role", "these also", 
+"these dissertation", "two chapters", 
+"were significantly", "when their",  "with men", 
+"with new", "with respect",  
+"due their",  "first dissertation",  
+"however there", 
+"most important", "my first", "my suggest", "social well", "study two", 
+"themselves their", "these groups", "these strategies", "three key", 
+ "what can",  
+"can help",  "consists three", 
+ "dissertation also", "experience their", 
+"explore these",
+"we find", "were also",  "with discussion", 
+"also their",  "combined with", "compared their", 
+"contact with", "data depth", "data three", "dissertation study", 
+"finally study",  
+"findings research",
+ "methods used", "more more", "more with", 
+"other forms", "overall findings", 
+"overall study",  "research focused", 
+"results these", "school with",  "study with",  
+"these chapters",  "three years", 
+ "using case", "work conflict",
+ "chapter whether", 
+ "correlated with", "data dissertation", 
+"data were", "despite their",  "however research", 
+"men their", "my results",  "other factors", 
+ "present study", "research these", "research what", 
+"states with", "structural cultural", "study adult", "their everyday", 
+ "these provide", "these spaces", 
+"three research", "use their", 
+"also more", "also show",  "concludes with", 
+"examines social",    
+"level characteristics", "much more", "my also", 
+"my show", "my work", 
+"outcomes with", "taken these", 
+"their first", "their interactions", "them with", 
+ "these differences", "these issues", "these outcomes", 
+"these research", "they did", "they face"
+)
+
+stop_post_tokens<- c("with", "their", "social", "these", "dissertation", "study", 
+"research", "more", "they", "chapter",  
+ "also", "three",  "who", 
+"first",  "were",  "findings", 
+"analysis", "use", "while", "within", "two", "my", "other", 
+"using", "across", "among", "can", "level", 
+ "based",  
+ "find", "well", 
+"what",  "time", "second", "when",  "studies",  "one",  
+"may", "care", 
+"however",
+"non", 
+"them", 
+"all",  "there", "used", 
+"third", "including",  "s", 
+ "four",  "upon", 
+ "n", 
+"co", "xa", "five", "re", "al", "et", 
+"et al")
+
+stop_post.df <- tibble(ngram=c(stop_post_tokens, stop_ngrams))
+rm(stop_post_tokens,stop_ngrams)
+
 ```
 
 # Corpus-Level Characteristics
@@ -59,7 +337,8 @@ rm(mystop)
 
 ```{r corpus-frequencies}
 abs_ngram_freq.df <-abs_tidy.df %>% 
-  count(ngram,sort=TRUE)
+  anti_join(stop_post.df,by="ngram") %>%
+  count(ngram,sort=TRUE) 
 ```
 
 ```{r frequencies-plots}
@@ -92,6 +371,9 @@ suppressWarnings(
       options = list(dom = 'Bfrltip',
                      buttons = c('csv'))
     )
+  
+  
+  
 
 ```
 
@@ -100,7 +382,7 @@ suppressWarnings(
 ```{r wordclouds }
     abs_ngram_freq.df  %>% arrange(desc(n)) %>%
           filter(str_detect(ngram, " ")) %>%
-      slice_head(n=250) %>%
+      slice_head(n=240) %>%
       rename(freq=n,word=ngram) %>%
       ggwordcloud::ggwordcloud2( size=.8)
 
@@ -109,15 +391,16 @@ suppressWarnings(
 ```{r wordcloud2}
     
     abs_ngram_freq.df  %>% arrange(desc(n)) %>%
-      slice_head(n=250) %>%
+      slice_head(n=240) %>%
       rename(freq=n,word=ngram) %>%
       ggwordcloud::ggwordcloud2(size=.9)
 ```
 
 ```{r keword-wordcloud}
-abs.df %>% pull(identifierKeywords) %>% str_split(patter=",") %>% unlist() %>% str_squish() %>% as_tibble() %>% count(value, sort=TRUE) -> keyword_freq.df
+abs.df %>% pull(identifierKeywords) %>% str_split(pattern=",") %>% unlist() %>% str_squish() %>% as_tibble() %>% count(value, sort=TRUE) -> keyword_freq.df
 
 keyword_freq.df  %>% arrange(desc(n)) %>%
+      filter(!is.na(value)) %>%
       slice_head(n=250) %>%
       rename(freq=n,word=value) %>%
       ggwordcloud::ggwordcloud2(size=.9) 
@@ -131,6 +414,7 @@ keyword_freq.df  %>% arrange(desc(n)) %>%
 ```{r absfreq}
 abs_doc_freq.df <-
   abs_tidy.df %>% 
+  anti_join(stop_post.df,by="ngram") %>%
   count(ngram,isbn) %>% 
   bind_tf_idf(ngram,isbn,n)
 
@@ -284,4 +568,76 @@ LDA_top_topics %>%
     )
 ```
 
+# Keyword Assisted
+
+```{r create-dictionary}
+
+seeds.df <- readxl::read_excel("data/socabs_topic_seeds.xlsx") %>%
+  rename(topic=Topic,ngram=Ngram)
+seeds.df %<>% filter(!is.na(`topic`) & str_detect(`topic`,":"))
+seeds.df %>% 
+  group_by(`topic`) %>% summarise(ngram_list=list(ngram)) %>% 
+  pmap( function(topic,ngram_list) { x<-list(); x[[topic]] <- ngram_list; x} ) %>% 
+  list_flatten() -> seeds.ls
+
+core_dfm <- 
+  left_join(  
+            full_join(seeds.df %>% select(ngram),
+                        core_ngrams.df %>% select(ngram), by = "ngram"),
+             abs_doc_freq.df, 
+             by=join_by(ngram)) %>%
+  select(ngram,isbn,n) %>%
+  rename(term=ngram, document=isbn, value=n) %>%
+  cast_dfm(document=document,term=term,value=value)
+
+```
+
+```{r seededlda}
+requireNamespace("quanteda")
+requireNamespace("seededlda")
+
+lda_seed <- seededlda::textmodel_seededlda(core_dfm,
+                                dict= quanteda::dictionary(seed.ls),
+                                batch_size = 1,
+                                residual = 20,
+                                auto_iter = TRUE,
+                                verbose = TRUE)
+
+seededlda::terms(lda_seed) %>% as_tibble()
+
+
+dat.df <- attr(lda_seed$data,which="docvars")
+
+dat.df$topic <- seededlda::topics(lda_seed)
+
+dat.df 
+```
+
+```{r keyword-ATM}
+requireNamespace("quanteda")
+requireNamespace("keyATM")
+keyATM_docs <- keyATM::keyATM_read(texts = core_dfm)
+summary(keyATM_docs)
+
+key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seed.ls)
+key_viz
+
+lda_key <- keyATM::keyATM(
+  docs              = keyATM_docs,    # text input
+  no_keyword_topics = 20,              # number of topics without keywords
+  keywords          = seed.ls,       # keywords
+  model             = "base",         # select the model
+)
+
+keyATM::top_words(lda_key)
+keyATM::top_docs(lda_key)
+keyATM::plot_modelfit(lda_key)
+keyATM::plot_alpha(lda_key)
+keyATM::plot_pi(lda_key)
+```
+
 # Gender
+
+```{r}
+  
+```
