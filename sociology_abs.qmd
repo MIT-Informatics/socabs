@@ -28,8 +28,30 @@ requireNamespace("topicmodels")
 ```{r, load-abs}
 abs1.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.xls")
 abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
-abs.df <- bind_rows(abs1.df, abs2.df)
+diss_meta.df <- bind_rows(abs1.df, abs2.df)
 rm("abs1.df","abs2.df")
+diss_controlled.df <- diss_meta.df %>% 
+  select(isbn,Authors,classification,subjectTerms,pubdate,
+         Abstract,Title,identifierKeywords,subjects) %>%
+  mutate(classification = replace_na(classification,""),
+         subjectTerms = replace_na(subjectTerms,""),
+         pubyear_clean = year(as_date(pubdate,format="%Y"))
+         ) %>%
+  rowwise() %>%
+  mutate(classification_clean = 
+          str_split_1(classification,pattern = ",") %>% 
+           str_squish() %>%
+          str_replace("^[0-9]+ ","") %>%
+          str_to_lower() %>% unique() %>% list() ,
+         subject_terms_clean = str_split_1(subjectTerms,pattern = ",") %>%
+           str_squish() %>% str_to_lower() %>% unique() %>%
+           list()
+  ) %>% 
+    ungroup() %>%
+    select(isbn, Authors, classification_clean, subject_terms_clean, pubyear_clean,
+           Abstract,Title,identifierKeywords,subjects)
+
+rm(diss_meta.df)
 ```
 
 ```{r tokenize}
@@ -51,14 +73,15 @@ mystop<-c("i.e","ie","e.g","eg","u.", as.character(1:100),
 
 other_stop <- get_stopwords()[["word"]]
 
-abs_tidy.df <-  abs.df %>%
-  select(isbn,Abstract) %>%
-  mutate(Clean_Abstract=Abstract) %>%  
-    mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "U\\.S\\.","USA")) %>%
-  mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "[-\\)\\(\\&\"/]"," ")) %>%
-  mutate(Clean_Abstract=str_replace_all(Clean_Abstract, "[^a-zA-Z \\.]", ""))  %>% 
-  mutate(Clean_Abstract=str_squish(Clean_Abstract)) %>% 
-  unnest_tokens(ngram, "Clean_Abstract", token = "skip_ngrams", n = 2,k=1,
+combined_tidy.df <-  diss_controlled.df %>%
+  select(isbn,Abstract,Title,identifierKeywords,subjects) %>%
+  unite(col="Clean_combined", sep=" ", remove=TRUE, na.rm=TRUE,
+        Abstract,Title,identifierKeywords,subjects) %>%
+  mutate(Clean_combined=str_replace_all(Clean_combined, "U\\.S\\.","USA")) %>%
+  mutate(Clean_combined=str_replace_all(Clean_combined, "[-\\)\\(\\&\"/]"," ")) %>%
+  mutate(Clean_combined=str_replace_all(Clean_combined, "[^a-zA-Z \\.]", ""))  %>% 
+  mutate(Clean_combined=str_squish(Clean_combined)) %>% 
+  unnest_tokens(ngram, "Clean_combined", token = "skip_ngrams", n = 2,k=1,
                 stopwords=mystop)  %>%
   #mutate(ngram = textstem::stem_strings(ngram, language="english")) %>%
   mutate(ngram = str_squish(ngram)) %>% 
@@ -302,7 +325,8 @@ stop_ngrams <- c(
 "outcomes with", "taken these", 
 "their first", "their interactions", "them with", 
  "these differences", "these issues", "these outcomes", 
-"these research", "they did", "they face"
+"these research", "they did", "they face",
+"genderwatch"
 )
 
 stop_post_tokens<- c("with", "their", "social", "these", "dissertation", "study", 
@@ -335,74 +359,85 @@ rm(stop_post_tokens,stop_ngrams)
 ## Word and Phrase Frequencies
 
 ```{r corpus-frequencies}
-abs_ngram_freq.df <-abs_tidy.df %>% 
+unc_ngram_freq.df <-combined_tidy.df %>% 
   anti_join(stop_post.df,by="ngram") %>%
   count(ngram,sort=TRUE) 
 ```
 
-```{r frequencies-plots}
+```{r uncontrolled-terms-frequencies}
 
 suppressWarnings(
   (
-    abs_ngram_freq.df %>%
-      ggplot(aes(x = n)) + geom_histogram(bins = 100) + scale_y_log10()
+    unc_ngram_freq.df %>%
+      ggplot(aes(x = n)) + geom_histogram(bins = 100) + scale_y_log10() +
+      labs(title="Distribution of 1 & 2 word terms from abs,title, keywords")
   ) %>% plotly::ggplotly()
 )
 
-  
-  abs_ngram_freq.df %>%
-    filter(str_detect(ngram, " ")) %>%
-    arrange(desc(n)) %>%
-    slice_head(n = 1000) %>%
-    DT::datatable (
-      data = .,
-      extensions = 'Buttons',
-      options = list(dom = 'Bfrltip',
-                     buttons = c('csv'))
-    )
-  
-  abs_ngram_freq.df  %>% 
-    arrange(desc(n)) %>%
-    slice_head(n = 1000) %>%
-    DT::datatable (
-      data = .,
-      extensions = 'Buttons',
-      options = list(dom = 'Bfrltip',
-                     buttons = c('csv'))
-    )
-  
-  
-  
-
-```
-
-## Obligatory Wordclouds
-
-```{r wordclouds }
-    abs_ngram_freq.df  %>% arrange(desc(n)) %>%
-          filter(str_detect(ngram, " ")) %>%
-      slice_head(n=240) %>%
+unc_ngram_freq.df  %>% arrange(desc(n)) %>%
+      slice_head(n=200) %>%
       rename(freq=n,word=ngram) %>%
-      ggwordcloud::ggwordcloud2( size=.8)
-
-```
-
-```{r wordcloud2}
+      ggwordcloud::ggwordcloud2(size=.8) +
+      labs(title="most popular uncontrolled terms") 
     
-    abs_ngram_freq.df  %>% arrange(desc(n)) %>%
-      slice_head(n=240) %>%
-      rename(freq=n,word=ngram) %>%
-      ggwordcloud::ggwordcloud2(size=.9)
+unc_ngram_freq.df  %>% 
+    arrange(desc(n)) %>%
+    slice_head(n = 1000) %>%
+    DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption ="Most frequent 1 and 2 word terms in uncontrolled description"
+    )
 ```
 
-```{r keword-wordcloud}
-abs.df %>% pull(identifierKeywords) %>% str_split(pattern=",") %>% unlist() %>% str_squish() %>% as_tibble() %>% count(value, sort=TRUE) -> keyword_freq.df
+```{}
+```
 
-keyword_freq.df  %>% arrange(desc(n)) %>%
-      filter(!is.na(value)) %>%
-      slice_head(n=250) %>%
-      rename(freq=n,word=value) %>%
-      ggwordcloud::ggwordcloud2(size=.9) 
+# Controlled Classifications
+
+```{r controlled-meta-clean}
+
+diss_controlled.df %>% 
+  rename(term=classification_clean) %>%
+  select(isbn, term, pubyear_clean) %>% 
+  unnest(cols=c(term))  -> diss_class_tidy.df
+
+diss_controlled.df %>% 
+  rename(term=subject_terms_clean) %>%
+  select(isbn, term, pubyear_clean) %>% 
+  unnest(cols=c(term))  -> diss_subj_tidy.df
+
+ndis <- nrow(diss_controlled.df)
+lower_q <- .05 
+upper_q <- .95
+
+{diss_subj_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  filter(n>= lower_q * ndis,
+         n<= upper_q * ndis) %>%
+  mutate(p = n/ndis) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p))+
+  geom_col() +
+  coord_flip() +
+  labs(x="assigned subjects")} %>% plotly::ggplotly()
+
+{diss_subj_tidy.df %>% 
+  filter(pubyear_clean < 2024) %>%
+  count(term, pubyear_clean, sort=TRUE) %>%
+  rowwise() %>%
+  mutate(p=n/ndis,
+         p_year=n/dylook.ls[[as.character(pubyear_clean)]]) %>%
+  filter(p_year >=  lower_q ,
+         p_year <=  upper_q ) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p_year))+
+  geom_col() +
+  coord_flip() +
+  labs(x="assigned subjects") +
+  facet_wrap(vars(pubyear_clean))} %>% plotly::ggplotly() 
+
+rm(dylook.ls, diss_year.df)
 
 ```
 
@@ -570,6 +605,9 @@ LDA_top_topics %>%
 # Keyword Assisted
 
 ```{r fetch-handcodings}
+
+if (!file.exists("data/coded_abstracts.xlsx") || 
+    !file.exists("data/ngram_seeds.xlsx")) {
 requireNamespace("googledrive")
 folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
 
@@ -588,22 +626,27 @@ googledrive::drive_download(
   type= "xlsx",
   overwrite=TRUE)
 
+ rm(folderid, filels)
+}
 ```
 
 ```{r create-dictionary}
 
 coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
 
+#TODO: stem seeds
+#TODO: flag seeds missing in corpus
+
 seeds_from_codes.df <- coded_abs.df %>% 
   select(contains(':')) %>% 
-  pivot_longer(cols=everything(), names_to="Topic", values_to = "Ngram") %>% 
-  filter(!is.na(Ngram) & Ngram != 'x') %>%
-  separate_longer_delim(Ngram,';') %>%
-  mutate(Ngram=str_squish(Ngram)) %>%
-  filter(Ngram!='')
+  pivot_longer(cols=everything(), names_to="topic", values_to = "ngram") %>% 
+  filter(!is.na(ngram) & ngram != 'x') %>%
+  separate_longer_delim(ngram,';') %>%
+  mutate(ngram=str_squish(ngram)) %>%
+  filter(ngram!='')
 
 seeds_from_ngrams.df <- readxl::read_excel("data/ngram_seeds.xlsx") %>%
-  rename(topic=Topic,ngram=Ngram)
+  rename(topic=Topic,ngram=Ngram) %>% select(topic,ngram)
 
 seeds_from_ngrams.df %<>% 
   separate_longer_delim(topic,";") %>% 
@@ -611,7 +654,7 @@ seeds_from_ngrams.df %<>%
   mutate(topic = str_squish(`topic`))  %>%
   filter(topic!="")
 
-seed.df <- bind_rows(seeds_from_codes.df, seeds_from_ngrams.df) %>% distinct()
+seeds.df <- bind_rows(seeds_from_codes.df, seeds_from_ngrams.df) %>% distinct()
   
 seeds.df %>% 
   group_by(`topic`) %>% summarise(ngram_list=list(ngram)) %>% 
@@ -620,12 +663,14 @@ seeds.df %>%
 
 core_dfm <- 
   left_join(  
-            full_join(seeds.df %>% select(ngram),
-                        core_ngrams.df %>% select(ngram), by = "ngram"),
+            bind_rows(seeds.df %>% select(ngram),
+                    core_ngrams.df %>% select(ngram)) %>% distinct(),
              abs_doc_freq.df, 
              by=join_by(ngram)) %>%
   select(ngram,isbn,n) %>%
-  rename(term=ngram, document=isbn, value=n) %>%
+  rename(term=ngram, document=isbn, value=n) %>% 
+  distinct() %>% 
+  na.omit() %>% 
   cast_dfm(document=document,term=term,value=value)
 
 ```
@@ -635,7 +680,7 @@ requireNamespace("quanteda")
 requireNamespace("seededlda")
 
 lda_seed <- seededlda::textmodel_seededlda(core_dfm,
-                                dict= quanteda::dictionary(seed.ls),
+                                dict= quanteda::dictionary(seeds.ls),
                                 batch_size = 1,
                                 residual = 20,
                                 auto_iter = TRUE,
@@ -674,7 +719,7 @@ keyATM::plot_alpha(lda_key)
 keyATM::plot_pi(lda_key)
 ```
 
-# Gender
+# Gender and Race of Author
 
 ```{r}
   
