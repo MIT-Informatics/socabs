@@ -30,26 +30,45 @@ abs1.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.xls")
 abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
 diss_meta.df <- bind_rows(abs1.df, abs2.df)
 rm("abs1.df","abs2.df")
-diss_controlled.df <- diss_meta.df %>% 
-  select(isbn,Authors,classification,subjectTerms,pubdate,
-         Abstract,Title,identifierKeywords,subjects) %>%
+
+# NOTE:
+# Columns in source overal with each other -- only selected columns used
+#  - all duplicates: classification, subjectClassifications, classiifcationCOdes, majorClassificationsCodes
+# - subjectTerms appears to be an automated coarse recoding of the classification
+# - appears author assigned, duplicate columns: identifierKeywords, subjects
+#   apparently post-processed to add "GenderWatch" and "y" tags 
+
+diss_cleaned.df <- diss_meta.df %>% 
+  select(isbn, Authors, classification, subjectTerms, pubdate,
+         Abstract, Title, identifierKeywords) %>%
   mutate(classification = replace_na(classification,""),
          subjectTerms = replace_na(subjectTerms,""),
+         identifierKeywords = replace_na(identifierKeywords,""),
          pubyear_clean = year(as_date(pubdate,format="%Y"))
          ) %>%
   rowwise() %>%
   mutate(classification_clean = 
-          str_split_1(classification,pattern = ",") %>% 
+          str_split_1(classification ,pattern = ",") %>% 
            str_squish() %>%
           str_replace("^[0-9]+ ","") %>%
           str_to_lower() %>% unique() %>% list() ,
          subject_terms_clean = str_split_1(subjectTerms,pattern = ",") %>%
            str_squish() %>% str_to_lower() %>% unique() %>%
+           list(), 
+          au_identifier_terms_clean =
+           str_split_1(identifierKeywords,pattern = ",") %>%
+           str_squish() %>% str_to_lower() %>% unique() %>%
            list()
   ) %>% 
     ungroup() %>%
     select(isbn, Authors, classification_clean, subject_terms_clean, pubyear_clean,
-           Abstract,Title,identifierKeywords,subjects)
+           Abstract,Title,identifierKeywords, au_identifier_terms_clean)
+
+diss_cleaned.df %>%
+  count(pubyear_clean) %>%
+  rename(year=pubyear_clean)-> dy.df
+dy.ls <- dy.df %>% pull(n)
+names(dy.ls) <- dy.df %>% pull(year)
 
 rm(diss_meta.df)
 ```
@@ -73,10 +92,10 @@ mystop<-c("i.e","ie","e.g","eg","u.", as.character(1:100),
 
 other_stop <- get_stopwords()[["word"]]
 
-combined_tidy.df <-  diss_controlled.df %>%
-  select(isbn,Abstract,Title,identifierKeywords,subjects) %>%
+combined_tidy.df <-  diss_cleaned.df %>%
+  select(isbn,Abstract,Title,identifierKeywords) %>%
   unite(col="Clean_combined", sep=" ", remove=TRUE, na.rm=TRUE,
-        Abstract,Title,identifierKeywords,subjects) %>%
+        Abstract,Title,identifierKeywords) %>%
   mutate(Clean_combined=str_replace_all(Clean_combined, "U\\.S\\.","USA")) %>%
   mutate(Clean_combined=str_replace_all(Clean_combined, "[-\\)\\(\\&\"/]"," ")) %>%
   mutate(Clean_combined=str_replace_all(Clean_combined, "[^a-zA-Z \\.]", ""))  %>% 
@@ -92,7 +111,6 @@ rm(mystop,other_stop)
 ```
 
 ```{r denoise}
-
 
 stop_ngrams <- c( 
 "associated with", 
@@ -346,25 +364,149 @@ stop_post_tokens<- c("with", "their", "social", "these", "dissertation", "study"
 "third", "including",  "s", 
  "four",  "upon", 
  "n", 
+"y",
 "co", "xa", "five", "re", "al", "et", 
 "et al")
 
 stop_post.df <- tibble(ngram=c(stop_post_tokens, stop_ngrams))
 rm(stop_post_tokens,stop_ngrams)
-
 ```
 
-# Corpus-Level Characteristics
+# Distributions of topics (unclustered)
 
-## Word and Phrase Frequencies
+## Dissertations by Controlled Classifications
 
-```{r corpus-frequencies}
-unc_ngram_freq.df <-combined_tidy.df %>% 
+```{r controlled-meta-clean}
+
+diss_cleaned.df %>% 
+  rename(term=classification_clean) %>%
+  select(isbn, term, pubyear_clean) %>% 
+  unnest(cols=c(term))  -> diss_class_tidy.df
+
+ndis <- sum(dy.ls)
+lower_q <- .025 
+upper_q <- .95
+
+
+{diss_class_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  mutate(p = n/sum(dy.ls)) %>%
+  filter(p>= lower_q ,
+         p <= upper_q ) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age of dissertation assigned to controlled classifications")} %>% plotly::ggplotly()
+
+{diss_class_tidy.df %>% 
+  filter(pubyear_clean < 2024) %>%
+  count(term, pubyear_clean, sort=TRUE) %>%
+  rowwise() %>%
+  mutate(p=n/ndis,
+         p_year=n/dy.ls[[as.character(pubyear_clean)]]) %>%
+  filter(p_year >=  lower_q ,
+         p_year <=  upper_q ) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p_year))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age dissertations in assigned  classification over time") +
+  facet_wrap(vars(pubyear_clean))} %>% plotly::ggplotly() 
+
+rm(diss_class_tidy.df, diss_subj_tidy.df, lower_q, upper_q)
+```
+
+## Dissertations by Author-Assigned Topics
+
+```{r au-topics}
+
+stop_topics.df <- tibble(term=c("y","genderwatch"))
+
+diss_cleaned.df %>% 
+  rename(term=au_identifier_terms_clean) %>%
+  select(isbn, term, pubyear_clean) %>% 
+  unnest(cols=c(term))  %>%
+  anti_join(stop_topics.df,by="term")-> diss_au_id_tidy.df
+
+ndis <- sum(dy.ls)
+lower_q <- .01 
+upper_q <- 1
+
+
+{diss_au_id_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  mutate(p = n/sum(dy.ls)) %>%
+  filter(p>= lower_q ,
+         p <= upper_q ) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age of dissertation by author-assigned keywords")} %>% plotly::ggplotly()
+
+rm(diss_au_id_tidy.df, stop_topics.df)
+```
+
+## Dissertations by Terminology
+
+```{r terms-dis-frequencies}
+
+unc_doc_freq.df <-
+  combined_tidy.df %>% 
   anti_join(stop_post.df,by="ngram") %>%
-  count(ngram,sort=TRUE) 
+  count(ngram,isbn) %>%
+  ungroup() %>%
+  rename(term=ngram) %>%
+  count(term)
+
+suppressWarnings(
+  (
+    unc_doc_freq.df %>%
+      ggplot(aes(x = n)) + geom_histogram(bins = 100) + scale_y_log10() +
+      labs(title="Distribution of dissertations that include a term from abs,title, keywords")
+  ) %>% plotly::ggplotly()
+)
+
+unc_doc_freq.df  %>% arrange(desc(n)) %>%
+      slice_head(n=200) %>%
+      rename(freq=n,word=term) %>%
+      ggwordcloud::ggwordcloud2(size=.8) +
+      labs(title="terms appearing in most dissertations") 
+
+lower_q <- .10 
+upper_q <- 1
+
+{unc_doc_freq.df %>% 
+  mutate(p = n/sum(dy.ls),
+         term=fct_reorder(term,p)) %>%
+  filter(n>= lower_q * ndis,
+         n<= upper_q * ndis) %>%
+  ggplot(aes(x=term,y=p))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age of dissertation assigned to controlled subjects")} %>% plotly::ggplotly()
+
+    
+unc_doc_freq.df  %>% 
+    arrange(desc(n)) %>%
+    slice_head(n = 500) %>%
+    DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption ="Terms appearing in most dissertations"
+    )
+
+rm(unc_doc_freq.df)
 ```
+
+## Distribution of Terminology Across Corpus
 
 ```{r uncontrolled-terms-frequencies}
+
+unc_ngram_freq.df <- 
+  combined_tidy.df %>% 
+  anti_join(stop_post.df,by="ngram") %>%
+  count(ngram,sort=TRUE) 
 
 suppressWarnings(
   (
@@ -382,7 +524,7 @@ unc_ngram_freq.df  %>% arrange(desc(n)) %>%
     
 unc_ngram_freq.df  %>% 
     arrange(desc(n)) %>%
-    slice_head(n = 1000) %>%
+    slice_head(n = 500) %>%
     DT::datatable (
       data = .,
       extensions = 'Buttons',
@@ -390,111 +532,11 @@ unc_ngram_freq.df  %>%
                      buttons = c('csv')),
       caption ="Most frequent 1 and 2 word terms in uncontrolled description"
     )
+
+rm(unc_ngram_freq.df)
 ```
 
-```{}
-```
-
-# Controlled Classifications
-
-```{r controlled-meta-clean}
-
-diss_controlled.df %>% 
-  rename(term=classification_clean) %>%
-  select(isbn, term, pubyear_clean) %>% 
-  unnest(cols=c(term))  -> diss_class_tidy.df
-
-diss_controlled.df %>% 
-  rename(term=subject_terms_clean) %>%
-  select(isbn, term, pubyear_clean) %>% 
-  unnest(cols=c(term))  -> diss_subj_tidy.df
-
-ndis <- nrow(diss_controlled.df)
-lower_q <- .05 
-upper_q <- .95
-
-{diss_subj_tidy.df %>% 
-  count(term, sort=TRUE) %>%
-  filter(n>= lower_q * ndis,
-         n<= upper_q * ndis) %>%
-  mutate(p = n/ndis) %>%
-  ggplot(aes(x=fct_reorder(term,p),y=p))+
-  geom_col() +
-  coord_flip() +
-  labs(x="assigned subjects")} %>% plotly::ggplotly()
-
-{diss_subj_tidy.df %>% 
-  filter(pubyear_clean < 2024) %>%
-  count(term, pubyear_clean, sort=TRUE) %>%
-  rowwise() %>%
-  mutate(p=n/ndis,
-         p_year=n/dylook.ls[[as.character(pubyear_clean)]]) %>%
-  filter(p_year >=  lower_q ,
-         p_year <=  upper_q ) %>%
-  ggplot(aes(x=fct_reorder(term,p),y=p_year))+
-  geom_col() +
-  coord_flip() +
-  labs(x="assigned subjects") +
-  facet_wrap(vars(pubyear_clean))} %>% plotly::ggplotly() 
-
-rm(dylook.ls, diss_year.df)
-
-```
-
-# Dissertation Characteristics
-
-## Terms
-
-```{r absfreq}
-abs_doc_freq.df <-
-  abs_tidy.df %>% 
-  anti_join(stop_post.df,by="ngram") %>%
-  count(ngram,isbn) %>% 
-  bind_tf_idf(ngram,isbn,n)
-
-ngram_count.df <- abs_doc_freq.df %>% 
-  group_by(ngram) %>%
-  summarize(num_dissertation=n())
-
-suppressWarnings(
-  (
-    ngram_count.df %>%
-      ggplot(aes(x = num_dissertation)) + geom_histogram(bins = 100) + scale_y_log10()
-  ) %>% plotly::ggplotly()
-)
-
-ngram_count.df %>% 
-  filter(num_dissertation > dim(abs.df)[[1]] *.05, 
-         num_dissertation < dim(abs.df)[[1]] *.5  )  %>%
-  mutate(percent_dissertation=round(num_dissertation/dim(abs.df)[[1]],digits=2)) %>%
-  select(ngram,percent_dissertation) %>%
-  arrange(desc(percent_dissertation)) -> core_ngrams.df
-
-  core_ngrams.df %>% 
-   DT::datatable (
-      data = .,
-      extensions = 'Buttons',
-      options = list(dom = 'Bfrltip',
-                     buttons = c('csv')),
-      caption = "ngrams appearing in at least 5% & less than 50% of dissertations"
-    )
-
-
-abs_doc_freq.df %>% 
-  group_by(isbn) %>%
-  arrange(desc(tf_idf), .by_group=TRUE) %>% 
-  slice_head(n=1) %>%
-  ungroup() %>%
-  arrange(desc(tf_idf)) %>%
-   DT::datatable (
-      data = .,
-      extensions = 'Buttons',
-      options = list(dom = 'Bfrltip',
-                     buttons = c('csv')),
-      caption = "each dissertation abstract's most distinctive word or phrase"
-    )
-
-```
+# Topic Coding
 
 ## Topics
 
@@ -719,8 +761,7 @@ keyATM::plot_alpha(lda_key)
 keyATM::plot_pi(lda_key)
 ```
 
-# Gender and Race of Author
+# Author Characteristics
 
 ```{r}
-  
 ```
