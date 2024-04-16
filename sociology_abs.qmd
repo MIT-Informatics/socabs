@@ -538,7 +538,105 @@ rm(unc_ngram_freq.df)
 
 # Topic Coding
 
-## Topics
+```{r retrieve-expertcodings}
+
+if (!file.exists("data/coded_abstracts.xlsx") || 
+    !file.exists("data/ngram_seeds.xlsx")) {
+requireNamespace("googledrive")
+folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
+
+filels <- googledrive::drive_ls(folderid)
+
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="abstracts_hand_coding") %>% pull(`id`),
+  path = "data/coded_abstracts",
+  type= "xlsx",
+  overwrite=TRUE)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="socabs_topic_seeds") %>% pull(`id`),
+  path = "data/ngram_seeds",
+  type= "xlsx",
+  overwrite=TRUE)
+
+ rm(folderid, filels)
+}
+```
+
+```{r create-dictionary}
+coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
+
+#TODO: stem seeds
+#TODO: flag seeds missing in corpus
+
+seeds_from_codes.df <- coded_abs.df %>% 
+  select(contains(':')) %>% 
+  pivot_longer(cols=everything(), names_to="topic", values_to = "ngram") %>% 
+  filter(!is.na(ngram) & ngram != 'x') %>%
+  separate_longer_delim(ngram,';') %>%
+  mutate(ngram=str_squish(ngram)) %>%
+  filter(ngram!='')
+
+seeds_from_ngrams.df <- 
+  suppressMessages( readxl::read_excel("data/ngram_seeds.xlsx") ) %>%
+  rename(topic=Topic,ngram=Ngram) %>% select(topic,ngram)
+
+seeds_from_ngrams.df %<>% 
+  separate_longer_delim(topic,";") %>% 
+  filter(!is.na(`topic`) & str_detect(`topic`,":")) %>%
+  mutate(topic = str_squish(`topic`))  %>%
+  filter(topic!="")
+
+seeds.df <- bind_rows(seeds_from_codes.df, seeds_from_ngrams.df) %>% 
+  mutate(ngram = str_to_lower(ngram) %>% 
+           str_replace_all(pattern="-"," ") %>%
+           str_squish()
+           ) %>%
+  distinct()
+  
+seeds.df %>% 
+  group_by(`topic`) %>% summarise(ngram_list=list(ngram)) %>% 
+  pmap( function(topic,ngram_list) { x<-list(); x[[topic]] <- ngram_list; x} ) %>% 
+  list_flatten() -> seeds.ls
+
+rm(seeds_from_codes.df, seeds_from_ngrams.df)
+```
+
+## Exact Match to Coded Topics Terms
+
+```{r exact-matches}
+exact_matches.df <- 
+  left_join(seeds.df,
+            combined_tidy.df %>% distinct(),
+            relationship="many-to-many",
+            by = "ngram"
+            )
+
+nmatched_dis <- exact_matches.df %>% pull(isbn) %>% unique() %>% length
+
+exact_matches.df %>% 
+  select(-ngram) %>% 
+  distinct() %>% 
+  count(topic) %>%
+  ungroup() %>%
+  separate_wider_delim(topic,names=c("dimension","category"),delim=":") -> topic_sum.df 
+
+topic_sum.df%>%
+  ggplot(aes(y=n,x=dimension,fill=category,label=category)) +
+  geom_col(position=position_fill()) +
+  geom_label(position=position_fill(), vjust=1) +
+  theme(legend.position="none") + 
+  facet_wrap(vars(dimension), scales="free_x")
+
+topic_sum.df %>% group_by(dimension) %>% gt::gt()
+
+#rm(exact_matches.df, nmatched_dis)
+```
+
+## Most Distinctive Terms in Each Dissertation
+
+## Topic Models
 
 ```{r LDA}
 
@@ -644,64 +742,9 @@ LDA_top_topics %>%
     )
 ```
 
-# Keyword Assisted
-
-```{r fetch-handcodings}
-
-if (!file.exists("data/coded_abstracts.xlsx") || 
-    !file.exists("data/ngram_seeds.xlsx")) {
-requireNamespace("googledrive")
-folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
-
-filels <- googledrive::drive_ls(folderid)
+```{r seeded-dictionary}
 
 
-googledrive::drive_download(
-  file = filels %>% filter(name=="abstracts_hand_coding") %>% pull(`id`),
-  path = "data/coded_abstracts",
-  type= "xlsx",
-  overwrite=TRUE)
-
-googledrive::drive_download(
-  file = filels %>% filter(name=="socabs_topic_seeds") %>% pull(`id`),
-  path = "data/ngram_seeds",
-  type= "xlsx",
-  overwrite=TRUE)
-
- rm(folderid, filels)
-}
-```
-
-```{r create-dictionary}
-
-coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
-
-#TODO: stem seeds
-#TODO: flag seeds missing in corpus
-
-seeds_from_codes.df <- coded_abs.df %>% 
-  select(contains(':')) %>% 
-  pivot_longer(cols=everything(), names_to="topic", values_to = "ngram") %>% 
-  filter(!is.na(ngram) & ngram != 'x') %>%
-  separate_longer_delim(ngram,';') %>%
-  mutate(ngram=str_squish(ngram)) %>%
-  filter(ngram!='')
-
-seeds_from_ngrams.df <- readxl::read_excel("data/ngram_seeds.xlsx") %>%
-  rename(topic=Topic,ngram=Ngram) %>% select(topic,ngram)
-
-seeds_from_ngrams.df %<>% 
-  separate_longer_delim(topic,";") %>% 
-  filter(!is.na(`topic`) & str_detect(`topic`,":")) %>%
-  mutate(topic = str_squish(`topic`))  %>%
-  filter(topic!="")
-
-seeds.df <- bind_rows(seeds_from_codes.df, seeds_from_ngrams.df) %>% distinct()
-  
-seeds.df %>% 
-  group_by(`topic`) %>% summarise(ngram_list=list(ngram)) %>% 
-  pmap( function(topic,ngram_list) { x<-list(); x[[topic]] <- ngram_list; x} ) %>% 
-  list_flatten() -> seeds.ls
 
 core_dfm <- 
   left_join(  
