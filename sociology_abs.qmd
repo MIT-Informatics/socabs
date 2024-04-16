@@ -417,7 +417,7 @@ upper_q <- .95
   labs(x="%age dissertations in assigned  classification over time") +
   facet_wrap(vars(pubyear_clean))} %>% plotly::ggplotly() 
 
-rm(diss_class_tidy.df, diss_subj_tidy.df, lower_q, upper_q)
+rm(diss_class_tidy.df, lower_q, upper_q)
 ```
 
 ## Dissertations by Author-Assigned Topics
@@ -432,10 +432,8 @@ diss_cleaned.df %>%
   unnest(cols=c(term))  %>%
   anti_join(stop_topics.df,by="term")-> diss_au_id_tidy.df
 
-ndis <- sum(dy.ls)
 lower_q <- .01 
 upper_q <- 1
-
 
 {diss_au_id_tidy.df %>% 
   count(term, sort=TRUE) %>%
@@ -456,11 +454,9 @@ rm(diss_au_id_tidy.df, stop_topics.df)
 
 unc_doc_freq.df <-
   combined_tidy.df %>% 
-  anti_join(stop_post.df,by="ngram") %>%
   count(ngram,isbn) %>%
   ungroup() %>%
-  rename(term=ngram) %>%
-  count(term)
+  count(ngram)
 
 suppressWarnings(
   (
@@ -470,38 +466,39 @@ suppressWarnings(
   ) %>% plotly::ggplotly()
 )
 
-unc_doc_freq.df  %>% arrange(desc(n)) %>%
-      slice_head(n=200) %>%
-      rename(freq=n,word=term) %>%
+unc_doc_freq.df  %>% 
+    anti_join(stop_post.df,by="ngram") %>%
+      slice_max(order_by=n, n=200) %>%
+      rename(freq=n,word=ngram) %>%
       ggwordcloud::ggwordcloud2(size=.8) +
-      labs(title="terms appearing in most dissertations") 
+      labs(title="terms appearing in most dissertations - excluding stopwords") 
 
 lower_q <- .10 
 upper_q <- 1
 
 {unc_doc_freq.df %>% 
+  anti_join(stop_post.df,by="ngram") %>%
   mutate(p = n/sum(dy.ls),
-         term=fct_reorder(term,p)) %>%
-  filter(n>= lower_q * ndis,
-         n<= upper_q * ndis) %>%
-  ggplot(aes(x=term,y=p))+
+         ngram=fct_reorder(ngram,p)) %>%
+  filter(p>= lower_q,
+         p<= upper_q) %>%
+  ggplot(aes(x=ngram,y=p))+
   geom_col() +
   coord_flip() +
-  labs(x="%age of dissertation assigned to controlled subjects")} %>% plotly::ggplotly()
+  labs(x="%age of dissertation assigned to controlled subjects (excluding stopwords, min 10%)")} %>% plotly::ggplotly()
 
     
 unc_doc_freq.df  %>% 
-    arrange(desc(n)) %>%
-    slice_head(n = 500) %>%
+    slice_max(order_by=n, n=1000) %>%
     DT::datatable (
       data = .,
       extensions = 'Buttons',
       options = list(dom = 'Bfrltip',
                      buttons = c('csv')),
-      caption ="Terms appearing in most dissertations"
+      caption ="ngrams appearing in most dissertations"
     )
 
-rm(unc_doc_freq.df)
+rm(unc_doc_freq.df, lower_q, upper_q)
 ```
 
 ## Distribution of Terminology Across Corpus
@@ -510,7 +507,6 @@ rm(unc_doc_freq.df)
 
 unc_ngram_freq.df <- 
   combined_tidy.df %>% 
-  anti_join(stop_post.df,by="ngram") %>%
   count(ngram,sort=TRUE) 
 
 suppressWarnings(
@@ -521,15 +517,15 @@ suppressWarnings(
   ) %>% plotly::ggplotly()
 )
 
-unc_ngram_freq.df  %>% arrange(desc(n)) %>%
-      slice_head(n=200) %>%
+unc_ngram_freq.df  %>% 
+      anti_join(stop_post.df,by="ngram") %>%
+      slice_max(order_by = n,n=200) %>%
       rename(freq=n,word=ngram) %>%
       ggwordcloud::ggwordcloud2(size=.8) +
-      labs(title="most popular uncontrolled terms") 
+      labs(title="most popular uncontrolled terms - excluding stop words") 
     
 unc_ngram_freq.df  %>% 
-    arrange(desc(n)) %>%
-    slice_head(n = 500) %>%
+    slice_max(order_by = n,n=1000) %>%
     DT::datatable (
       data = .,
       extensions = 'Buttons',
@@ -537,7 +533,6 @@ unc_ngram_freq.df  %>%
                      buttons = c('csv')),
       caption ="Most frequent 1 and 2 word terms in uncontrolled description"
     )
-
 rm(unc_ngram_freq.df)
 ```
 
@@ -594,7 +589,6 @@ requireNamespace("googledrive")
 folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
 
 filels <- googledrive::drive_ls(folderid)
-
 
 googledrive::drive_download(
   file = filels %>% filter(name=="abstracts_hand_coding") %>% pull(`id`),
@@ -654,7 +648,6 @@ rm(seeds_from_codes.df, seeds_from_ngrams.df)
 ## Exact Match to Coded Topics Terms
 
 ```{r exact-matches}
-requireNamespace("gtsummary")
 exact_matches.df <- 
   left_join(seeds.df,
             combined_tidy.df %>% distinct(),
@@ -678,178 +671,87 @@ topic_sum.df%>%
   theme(legend.position="none") + 
   facet_wrap(vars(dimension), scales="free_x")
 
-topic_sum.df %>% group_by(dimension) %>% gt::gt()
+topic_sum.df %>% 
+  group_by(dimension) %>%
+  mutate(p=n/sum(dy.ls)) %>% 
+  gt::gt() %>%
+  gt::fmt_percent(columns="p")
 
-
-#rm(topic_sum.df)
+rm(topic_sum.df)
 ```
 
 ## Topic Models
 
-```{r LDA}
+```{r keyword-assisted-topics}
 
-core_dtm <- 
-  left_join( core_ngrams.df %>% select(ngram), abs_doc_freq.df, 
-             by=join_by(ngram)) %>%
-  select(ngram,isbn,n) %>%
-  rename(term=ngram, document=isbn, value=n) %>%
-  cast_dtm(term=term,document=document,value=value)
+#requireNamespace("quanteda")
+requireNamespace("keyATM")
 
-LDA.res <- topicmodels::LDA(x = core_dtm, k =20, method="Gibbs")
+combined_tf_idf.df %>% 
+  group_by(ngram) %>%
+  summarize(n=n()) %>%
+  mutate(p=n/sum(dy.ls)) -> ngram_diss_ct.df
 
-LDA.topics <- tidy(LDA.res, matrix = "beta")
-LDA_top_terms <- LDA.topics %>%
-  group_by(topic) %>%
-  slice_max(beta, n = 5) %>% 
-  ungroup() %>%
-  arrange(topic, -beta)
+lower_q <- .01 
+upper_q <- 1
 
-LDA_top_terms %>%
-  mutate(term = reorder_within(term, beta, topic)) %>%
-  ggplot(aes(beta, term, fill = factor(topic))) +
-  geom_col(show.legend = FALSE) +
-  facet_wrap(~ topic, scales = "free") +
-  scale_y_reordered()
-```
-
-```{r LDA-v2}
-
-# using textmineR
-
-core_sparse <- 
-  left_join( core_ngrams.df %>% select(ngram), abs_doc_freq.df, 
-             by=join_by(ngram)) %>%
-  select(ngram,isbn,n) %>%
-  rename(term=ngram, document=isbn, value=n)%>%
-  cast_sparse(row=document,column=term,value=value)
-
-LDA.res.tm <- 
-  textmineR::FitLdaModel(dtm = core_sparse, 
-                 k = 20,
-                 iterations = 200,
-                 burnin = 175)
-
-LDA.res <- topicmodels::LDA(x = core_dtm, k =20)
-
-tidy.lda_topic_model <-function(x, matrix="beta") {
-  
-  if (matrix=="beta") {
-    res  <- data.frame(topic = as.integer(stringr::str_replace_all(rownames(x$phi), "t_", "")), 
-                        x$phi, 
-                        stringsAsFactors = FALSE) %>%
-  gather(term, beta, -topic) %>% 
-  tibble::as_tibble()
-    
-  } else {
-    res <- data.frame(document = rownames(x$theta),
-                         x$theta,
-                         stringsAsFactors = FALSE) %>%
-  gather(topic, gamma, -document) %>%
-  tibble::as_tibble()
-  }
-  res
-}
-
-LDA.topics <- tidy(LDA.res.tm, matrix = "beta")
-LDA_top_terms <- LDA.topics %>%
-  group_by(topic) %>%
-  slice_max(beta, n = 5) %>% 
-  ungroup() %>%
-  arrange(topic, -beta)
-
-LDA_top_terms %>%
-  mutate(term = reorder_within(term, beta, topic)) %>%
-  ggplot(aes(beta, term, fill = factor(topic))) +
-  geom_col(show.legend = FALSE) +
-  facet_wrap(~ topic, scales = "free") +
-  scale_y_reordered()
-```
-
-```{r topic-cluster}
-# document cluster
-LDA.docs <-  tidy(LDA.res.tm, matrix = "gamma")
-
-LDA.docs %<>% left_join(by=c("document"="isbn"), 
-                        abs.df %>% select(isbn,Title))
-
-LDA_top_topics <- LDA.docs %>%
-  group_by(topic) %>%
-  slice_max(gamma, n = 5) %>% 
-  ungroup() %>%
-  arrange(document, -gamma)
-
-LDA_top_topics %>%
-   arrange(topic) %>% 
-   select(-document) %>%
-   DT::datatable (
-      data = .,
-      extensions = 'Buttons',
-      options = list(dom = 'Bfrltip',
-                     buttons = c('csv')),
-      caption = "each dissertation abstract's most distinctive word or phrase"
-    )
-```
-
-```{r seeded-dictionary}
-
-
+core_ngrams.df  <-
+  ngram_diss_ct.df %>%
+  filter( p >= lower_q, p<= upper_q) %>%
+  select("ngram") %>%
+  bind_rows(seeds.df %>% select(ngram))  %>%
+  distinct() %>%
+  left_join(combined_tf_idf.df %>% select(ngram,isbn,n)) %>%
+  na.omit() %>%
+  distinct()
 
 core_dfm <- 
-  left_join(  
-            bind_rows(seeds.df %>% select(ngram),
-                    core_ngrams.df %>% select(ngram)) %>% distinct(),
-             abs_doc_freq.df, 
-             by=join_by(ngram)) %>%
-  select(ngram,isbn,n) %>%
+  core_ngrams.df %>%
   rename(term=ngram, document=isbn, value=n) %>% 
-  distinct() %>% 
-  na.omit() %>% 
   cast_dfm(document=document,term=term,value=value)
 
-```
-
-```{r seededlda}
-requireNamespace("quanteda")
-requireNamespace("seededlda")
-
-lda_seed <- seededlda::textmodel_seededlda(core_dfm,
-                                dict= quanteda::dictionary(seeds.ls),
-                                batch_size = 1,
-                                residual = 20,
-                                auto_iter = TRUE,
-                                verbose = TRUE)
-
-seededlda::terms(lda_seed) %>% as_tibble()
-
-
-dat.df <- attr(lda_seed$data,which="docvars")
-
-dat.df$topic <- seededlda::topics(lda_seed)
-
-dat.df 
-```
-
-```{r keyword-ATM}
-requireNamespace("quanteda")
-requireNamespace("keyATM")
 keyATM_docs <- keyATM::keyATM_read(texts = core_dfm)
 summary(keyATM_docs)
 
-key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seed.ls)
+key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seeds.ls)
 key_viz
 
 lda_key <- keyATM::keyATM(
   docs              = keyATM_docs,    # text input
   no_keyword_topics = 20,              # number of topics without keywords
-  keywords          = seed.ls,       # keywords
+  keywords          = seeds.ls,       # keywords
   model             = "base",         # select the model
 )
 
-keyATM::top_words(lda_key)
-keyATM::top_docs(lda_key)
-keyATM::plot_modelfit(lda_key)
-keyATM::plot_alpha(lda_key)
-keyATM::plot_pi(lda_key)
+lda_key %>% keyATM::plot_modelfit()
+```
+
+```{r key-atm-results}
+
+lda_key %>% keyATM::top_words()  %>%
+  gt::gt() %>% 
+  gt::tab_header("Top words for each topic")
+  
+lda_key %>% keyATM::top_docs(n=5) %>% 
+  pivot_longer(cols=everything()) %>%
+  rowwise() %>%
+  mutate(title=diss_cleaned.df[[value,"Title"]]) %>%
+  ungroup() %>% 
+  select(-value) %>%
+  group_by(name) %>%
+  gt::gt() %>%
+  gt::tab_header("Top dissertations in each topic")
+
+
+{lda_key %>% keyATM::plot_topicprop(
+  n = 5,
+  show_topic = NULL,
+  show_topwords = TRUE,
+  label_topic = NULL,
+  order = "proportion")}[["figure"]] %>%
+  plotly::ggplotly()
+
+
 ```
 
 # Author Characteristics
