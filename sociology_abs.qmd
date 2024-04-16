@@ -107,6 +107,11 @@ combined_tidy.df <-  diss_cleaned.df %>%
   filter(!str_detect(ngram,"\\.")) %>%
   filter(ngram!="")
 
+combined_tf_idf.df <- 
+  combined_tidy.df %>% 
+  count(ngram,isbn) %>%
+    bind_tf_idf(ngram, isbn, n)
+
 rm(mystop,other_stop)
 ```
 
@@ -536,6 +541,49 @@ unc_ngram_freq.df  %>%
 rm(unc_ngram_freq.df)
 ```
 
+## Most Distinctive Terms in Each Dissertation
+
+```{r tdf-explore}
+
+nterms <- 5
+ndiss <- 100
+
+topterms.df <-
+  combined_tf_idf.df %>% 
+  group_by(isbn) %>%
+  slice_max(order_by=tf_idf, n=nterms) 
+
+topdis.df <-
+  topterms.df %>%
+  group_by(isbn) %>%
+  summarize(mean_tf_idf = mean(tf_idf)) %>%
+  ungroup() %>%
+  slice_max(order_by=mean_tf_idf, n= ndiss)
+  
+distinctive_diss.df <-
+  left_join(topdis.df %>% select(isbn),
+            topterms.df %>% select(isbn, ngram),
+            by = "isbn") %>% 
+  group_by(isbn) %>%
+  summarize(distinct_terms = paste(ngram, sep =" ", collapse=", ")) %>% 
+  ungroup() %>%
+  left_join(diss_cleaned.df %>% select(Title,isbn), by="isbn")
+
+
+distinctive_diss.df %>%
+  relocate(Title, distinct_terms) %>%
+  select(-isbn) %>%
+  DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption ="Most distinctive terms in dissertations with distinctive terms"
+    )
+ 
+rm(nterms,ndiss, topterms.df, topdis.df, distinctive_diss.df)
+```
+
 # Topic Coding
 
 ```{r retrieve-expertcodings}
@@ -606,6 +654,7 @@ rm(seeds_from_codes.df, seeds_from_ngrams.df)
 ## Exact Match to Coded Topics Terms
 
 ```{r exact-matches}
+requireNamespace("gtsummary")
 exact_matches.df <- 
   left_join(seeds.df,
             combined_tidy.df %>% distinct(),
@@ -631,10 +680,9 @@ topic_sum.df%>%
 
 topic_sum.df %>% group_by(dimension) %>% gt::gt()
 
-#rm(exact_matches.df, nmatched_dis)
-```
 
-## Most Distinctive Terms in Each Dissertation
+#rm(topic_sum.df)
+```
 
 ## Topic Models
 
