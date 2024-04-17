@@ -392,7 +392,6 @@ ndis <- sum(dy.ls)
 lower_q <- .025 
 upper_q <- .95
 
-
 {diss_class_tidy.df %>% 
   count(term, sort=TRUE) %>%
   mutate(p = n/sum(dy.ls)) %>%
@@ -487,7 +486,6 @@ upper_q <- 1
   coord_flip() +
   labs(x="%age of dissertation assigned to controlled subjects (excluding stopwords, min 10%)")} %>% plotly::ggplotly()
 
-    
 unc_doc_freq.df  %>% 
     slice_max(order_by=n, n=1000) %>%
     DT::datatable (
@@ -563,7 +561,6 @@ distinctive_diss.df <-
   summarize(distinct_terms = paste(ngram, sep =" ", collapse=", ")) %>% 
   ungroup() %>%
   left_join(diss_cleaned.df %>% select(Title,isbn), by="isbn")
-
 
 distinctive_diss.df %>%
   relocate(Title, distinct_terms) %>%
@@ -645,6 +642,42 @@ seeds.df %>%
 rm(seeds_from_codes.df, seeds_from_ngrams.df)
 ```
 
+## Hand Coded Abstracts
+
+```{r}
+hand_codes_tmp.df <-
+  coded_abs.df %>% select(contains(':'),EpiStyle_type) %>% 
+  filter( if_any(everything(), ~ !is.na(.x)) )
+
+
+epi_tot.df <- hand_codes_tmp.df %>%
+  select(EpiStyle_type) %>% 
+  rename(category=EpiStyle_type) %>%
+  count(category) %>%
+  mutate(dimension="epi")
+
+hand_codes_tmp.df %>% select(-EpiStyle_type) %>%
+    mutate(across(everything(), ~ case_when(is.na(.x) ~ TRUE,  .default = FALSE))) %>%
+    pivot_longer(cols=everything()) %>%
+    count(name,value) %>%
+    filter(value) %>%
+    select(-value) %>%
+    separate_wider_delim(name,names=c("dimension","category"),delim=":") %>%
+    bind_rows(epi_tot.df)  -> hand_code_tot.df
+
+hand_code_tot.df %>%
+    mutate(dimension = as.factor(dimension), category=as.factor(category)) %>%
+    ggplot(aes(y=n,x=dimension,  fill=category,label=category)) +
+    geom_col(position=position_dodge2()) +
+    geom_label(position=position_dodge2(width=1), vjust=1) +
+    theme(legend.position="none") + 
+    facet_wrap(vars(dimension), scales="free_x")
+  
+  rm(epi_tot.df, hand_codes_tmp.df, hand_code_tot.df)
+```
+
+\
+
 ## Exact Match to Coded Topics Terms
 
 ```{r exact-matches}
@@ -716,12 +749,12 @@ summary(keyATM_docs)
 key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seeds.ls)
 key_viz
 
-lda_key <- keyATM::keyATM(
+suppressMessages(lda_key <- keyATM::keyATM(
   docs              = keyATM_docs,    # text input
   no_keyword_topics = 20,              # number of topics without keywords
   keywords          = seeds.ls,       # keywords
   model             = "base",         # select the model
-)
+))
 
 lda_key %>% keyATM::plot_modelfit()
 ```
