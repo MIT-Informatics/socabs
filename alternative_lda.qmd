@@ -1,0 +1,182 @@
+---
+title: "Sociology Abstracts"
+format: html
+editor: visual
+toc: TRUE
+code-tools: TRUE
+code-fold: TRUE
+embed-resources: TRUE
+---
+
+## Topic Models
+
+```{r LDA}
+
+core_dtm <- 
+  left_join( core_ngrams.df %>% select(ngram), abs_doc_freq.df, 
+             by=join_by(ngram)) %>%
+  select(ngram,isbn,n) %>%
+  rename(term=ngram, document=isbn, value=n) %>%
+  cast_dtm(term=term,document=document,value=value)
+
+LDA.res <- topicmodels::LDA(x = core_dtm, k =20, method="Gibbs")
+
+LDA.topics <- tidy(LDA.res, matrix = "beta")
+LDA_top_terms <- LDA.topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 5) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+LDA_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+```{r LDA-v2}
+
+# using textmineR
+
+core_sparse <- 
+  left_join( core_ngrams.df %>% select(ngram), abs_doc_freq.df, 
+             by=join_by(ngram)) %>%
+  select(ngram,isbn,n) %>%
+  rename(term=ngram, document=isbn, value=n)%>%
+  cast_sparse(row=document,column=term,value=value)
+
+LDA.res.tm <- 
+  textmineR::FitLdaModel(dtm = core_sparse, 
+                 k = 20,
+                 iterations = 200,
+                 burnin = 175)
+
+LDA.res <- topicmodels::LDA(x = core_dtm, k =20)
+
+tidy.lda_topic_model <-function(x, matrix="beta") {
+  
+  if (matrix=="beta") {
+    res  <- data.frame(topic = as.integer(stringr::str_replace_all(rownames(x$phi), "t_", "")), 
+                        x$phi, 
+                        stringsAsFactors = FALSE) %>%
+  gather(term, beta, -topic) %>% 
+  tibble::as_tibble()
+    
+  } else {
+    res <- data.frame(document = rownames(x$theta),
+                         x$theta,
+                         stringsAsFactors = FALSE) %>%
+  gather(topic, gamma, -document) %>%
+  tibble::as_tibble()
+  }
+  res
+}
+
+LDA.topics <- tidy(LDA.res.tm, matrix = "beta")
+LDA_top_terms <- LDA.topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 5) %>% 
+  ungroup() %>%
+  arrange(topic, -beta)
+
+LDA_top_terms %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(beta, term, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  scale_y_reordered()
+```
+
+```{r topic-cluster}
+# document cluster
+LDA.docs <-  tidy(LDA.res.tm, matrix = "gamma")
+
+LDA.docs %<>% left_join(by=c("document"="isbn"), 
+                        abs.df %>% select(isbn,Title))
+
+LDA_top_topics <- LDA.docs %>%
+  group_by(topic) %>%
+  slice_max(gamma, n = 5) %>% 
+  ungroup() %>%
+  arrange(document, -gamma)
+
+LDA_top_topics %>%
+   arrange(topic) %>% 
+   select(-document) %>%
+   DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption = "each dissertation abstract's most distinctive word or phrase"
+    )
+```
+
+```{r seeded-dictionary}
+
+
+
+core_dfm <- 
+  left_join(  
+            bind_rows(seeds.df %>% select(ngram),
+                    core_ngrams.df %>% select(ngram)) %>% distinct(),
+             abs_doc_freq.df, 
+             by=join_by(ngram)) %>%
+  select(ngram,isbn,n) %>%
+  rename(term=ngram, document=isbn, value=n) %>% 
+  distinct() %>% 
+  na.omit() %>% 
+  cast_dfm(document=document,term=term,value=value)
+
+```
+
+```{r seededlda}
+requireNamespace("quanteda")
+requireNamespace("seededlda")
+
+lda_seed <- seededlda::textmodel_seededlda(core_dfm,
+                                dict= quanteda::dictionary(seeds.ls),
+                                batch_size = 1,
+                                residual = 20,
+                                auto_iter = TRUE,
+                                verbose = TRUE)
+
+seededlda::terms(lda_seed) %>% as_tibble()
+
+
+dat.df <- attr(lda_seed$data,which="docvars")
+
+dat.df$topic <- seededlda::topics(lda_seed)
+
+dat.df 
+```
+
+```{r keyword-ATM}
+requireNamespace("quanteda")
+requireNamespace("keyATM")
+keyATM_docs <- keyATM::keyATM_read(texts = core_dfm)
+summary(keyATM_docs)
+
+key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seed.ls)
+key_viz
+
+lda_key <- keyATM::keyATM(
+  docs              = keyATM_docs,    # text input
+  no_keyword_topics = 20,              # number of topics without keywords
+  keywords          = seed.ls,       # keywords
+  model             = "base",         # select the model
+)
+
+keyATM::top_words(lda_key)
+keyATM::top_docs(lda_key)
+keyATM::plot_modelfit(lda_key)
+keyATM::plot_alpha(lda_key)
+keyATM::plot_pi(lda_key)
+```
+
+# Author Characteristics
+
+```{r}
+```

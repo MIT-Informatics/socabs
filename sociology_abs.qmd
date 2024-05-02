@@ -386,11 +386,12 @@ rm(stop_post_tokens,stop_ngrams)
 diss_cleaned.df %>% 
   rename(term=classification_clean) %>%
   select(isbn, term, pubyear_clean) %>% 
-  unnest(cols=c(term))  -> diss_class_tidy.df
+  unnest(cols=c(term))  %>%
+  filter(term !="sociology")-> diss_class_tidy.df
 
 ndis <- sum(dy.ls)
-lower_q <- .025 
-upper_q <- .95
+lower_q <- .01
+upper_q <- 1
 
 {diss_class_tidy.df %>% 
   count(term, sort=TRUE) %>%
@@ -405,6 +406,7 @@ upper_q <- .95
 {diss_class_tidy.df %>% 
   filter(pubyear_clean < 2024) %>%
   count(term, pubyear_clean, sort=TRUE) %>%
+  filter(term !="sociology") %>%
   rowwise() %>%
   mutate(p=n/ndis,
          p_year=n/dy.ls[[as.character(pubyear_clean)]]) %>%
@@ -484,7 +486,7 @@ upper_q <- 1
   ggplot(aes(x=ngram,y=p))+
   geom_col() +
   coord_flip() +
-  labs(x="%age of dissertation assigned to controlled subjects (excluding stopwords, min 10%)")} %>% plotly::ggplotly()
+  labs(x="terms appearing in most dissertations (excluding stopwords, min 1%)")} %>% plotly::ggplotly()
 
 unc_doc_freq.df  %>% 
     slice_max(order_by=n, n=1000) %>%
@@ -581,7 +583,9 @@ rm(nterms,ndiss, topterms.df, topdis.df, distinctive_diss.df)
 ```{r retrieve-expertcodings}
 
 if (!file.exists("data/coded_abstracts.xlsx") || 
-    !file.exists("data/ngram_seeds.xlsx")) {
+    !file.exists("data/ngram_seeds.xlsx") ||
+    TRUE
+    ) {
 requireNamespace("googledrive")
 folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
 
@@ -657,7 +661,7 @@ epi_tot.df <- hand_codes_tmp.df %>%
   mutate(dimension="epi")
 
 hand_codes_tmp.df %>% select(-EpiStyle_type) %>%
-    mutate(across(everything(), ~ case_when(is.na(.x) ~ TRUE,  .default = FALSE))) %>%
+    mutate(across(everything(), ~ case_when(is.na(.x) ~ FALSE,  .default = TRUE))) %>%
     pivot_longer(cols=everything()) %>%
     count(name,value) %>%
     filter(value) %>%
@@ -695,18 +699,23 @@ exact_matches.df %>%
   distinct() %>% 
   count(topic) %>%
   ungroup() %>%
+  
   separate_wider_delim(topic,names=c("dimension","category"),delim=":") -> topic_sum.df 
 
+topic_sum.df %<>% 
+  group_by(dimension) %>%
+  mutate(p=n/sum(dy.ls)) %>%
+  ungroup()
+
 topic_sum.df%>%
-  ggplot(aes(y=n,x=dimension,fill=category,label=category)) +
-  geom_col(position=position_fill()) +
-  geom_label(position=position_fill(), vjust=1) +
+  ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
+  geom_col(position=position_dodge2(width=1)) +
+  geom_label(position=position_dodge2(width=1), vjust=1) +
   theme(legend.position="none") + 
   facet_wrap(vars(dimension), scales="free_x")
 
 topic_sum.df %>% 
   group_by(dimension) %>%
-  mutate(p=n/sum(dy.ls)) %>% 
   gt::gt() %>%
   gt::fmt_percent(columns="p")
 
