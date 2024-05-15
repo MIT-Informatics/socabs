@@ -8,7 +8,7 @@ code-fold: TRUE
 embed-resources: TRUE
 ---
 
-## Setup
+# Setup
 
 Load data from proquest on 2020-2024-02-01 sociology department dissertations in English. Clean and tokenise as 2-skip-1 ngrams
 
@@ -58,6 +58,8 @@ googledrive::drive_download(
 
  rm(folderid, filels)
 }
+
+coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
 ```
 
 ```{r, load-abs}
@@ -107,6 +109,22 @@ names(dy.ls) <- dy.df %>% pull(year)
 
 rm(diss_meta.df)
 ```
+
+# Author Characteristics
+
+```{r gender-coding}
+requireNamespace("opengender")
+diss_cleaned_plus_gender.df <- diss_cleaned.df %>% 
+  mutate(given=  str_split_i(Authors,pattern=",",2)
+         %>% str_squish() %>% 
+           str_split_i(pattern="[:space:]",1)) 
+
+diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions()
+
+diss_cleaned_plus_gender.df %>% 
+  summarize(opengender::gender_mean(og_details,simplify_output="row"))
+```
+#Text prep 
 
 ```{r tokenize}
 # subset of the snowball stopwords
@@ -458,7 +476,8 @@ diss_cleaned.df %>%
   rename(term=au_identifier_terms_clean) %>%
   select(isbn, term, pubyear_clean) %>% 
   unnest(cols=c(term))  %>%
-  anti_join(stop_topics.df,by="term")-> diss_au_id_tidy.df
+  anti_join(stop_topics.df,by="term") %>%
+  distinct() -> diss_au_id_tidy.df
 
 lower_q <- .025
 upper_q <- 1
@@ -585,12 +604,59 @@ rm(nterms,ndiss, topterms.df, topdis.df, distinctive_diss.df)
 
 # Topic Coding
 
-```{r create-dictionary}
-coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
+## Hand Coded Abstracts
+```{r coding-setup}
+coded_isbns.df <- NULL
+```
 
-#TODO: stem seeds
-#TODO: flag seeds missing in corpus
 
+```{r hand-coded}
+hand_codes_tmp.df <-
+  coded_abs.df %>% select(isbn,contains(':'),EpiStyle_type) %>% 
+  filter( if_any(everything(), ~ !is.na(.x)) )
+
+hand_codes_tmp.df %<>% 
+  mutate(EpiStyle_type = str_to_lower(EpiStyle_type)) %>%
+  #select(isbn,EpiStyle_type) %>%
+  pivot_wider(names_from=EpiStyle_type, values_from=EpiStyle_type,
+              names_prefix="epi:") %>% 
+  select(-"epi:NA") %>%
+  mutate(across(!isbn, 
+                  ~ case_when(is.na(.x) ~ FALSE,  .default = TRUE)))
+
+hand_codes_tmp.df %<>%
+  pivot_longer(!isbn) %>%
+  rename(topic=name) %>%
+  mutate(coding_src="hand")
+
+coded_isbns.df %<>% 
+  bind_rows(hand_codes_tmp.df)
+ 
+hand_code_tot.df <-
+   hand_codes_tmp.df %>% 
+    select(-isbn,coding_src) %>%
+    filter(value) %>%
+    count(topic,value) %>%
+    select(-value) %>%
+    separate_wider_delim(topic,
+                         names=c("dimension","category"),delim=":")
+
+{hand_code_tot.df %>%
+    mutate(dimension = as.factor(dimension),
+           category=as.factor(category)) %>%
+    ggplot(aes(y=n,x=dimension,  fill=category,label=category)) +
+    geom_col(position=position_dodge2()) +
+    geom_text(position=position_dodge2(width=1), vjust=1) +
+    theme(legend.position="none") + 
+    facet_wrap(vars(dimension), scales="free_x")} %>%
+  plotly::ggplotly()
+
+rm(hand_codes_tmp.df, hand_code_tot.df) 
+```
+
+## Exact Match to Coded Topics Terms
+
+```{r prepare-seed-list}
 seeds_from_codes.df <- coded_abs.df %>% 
   select(contains(':')) %>% 
   pivot_longer(cols=everything(), names_to="topic", values_to = "ngram") %>% 
@@ -619,45 +685,6 @@ seeds.df <- bind_rows(seeds_from_codes.df, seeds_from_ngrams.df) %>%
 rm(seeds_from_codes.df, seeds_from_ngrams.df)
 ```
 
-## Hand Coded Abstracts
-
-```{r hand-coded}
-hand_codes_tmp.df <-
-  coded_abs.df %>% select(contains(':'),EpiStyle_type) %>% 
-  filter( if_any(everything(), ~ !is.na(.x)) )
-
-
-epi_tot.df <- hand_codes_tmp.df %>%
-  select(EpiStyle_type) %>% 
-  rename(category=EpiStyle_type) %>%
-  count(category) %>%
-  mutate(dimension="epi")
-
-hand_codes_tmp.df %>% select(-EpiStyle_type) %>%
-    mutate(across(everything(), ~ case_when(is.na(.x) ~ FALSE,  .default = TRUE))) %>%
-    pivot_longer(cols=everything()) %>%
-    count(name,value) %>%
-    filter(value) %>%
-    select(-value) %>%
-    separate_wider_delim(name,names=c("dimension","category"),delim=":") %>%
-    bind_rows(epi_tot.df)  -> hand_code_tot.df
-
-{hand_code_tot.df %>%
-    mutate(dimension = as.factor(dimension), category=as.factor(category)) %>%
-    ggplot(aes(y=n,x=dimension,  fill=category,label=category)) +
-    geom_col(position=position_dodge2()) +
-    geom_text(position=position_dodge2(width=1), vjust=1) +
-    theme(legend.position="none") + 
-    facet_wrap(vars(dimension), scales="free_x")} %>%
-  plotly::ggplotly()
-  
-  #rm(epi_tot.df, hand_codes_tmp.df, hand_code_tot.df) 
-```
-
-\
-
-## Exact Match to Coded Topics Terms
-
 ```{r exact-matches}
 exact_matches.df <- 
   left_join(seeds.df,
@@ -666,14 +693,27 @@ exact_matches.df <-
             by = "ngram"
             )
 
-nmatched_dis <- exact_matches.df %>% pull(isbn) %>% unique() %>% length
 
 exact_matches.df %>% 
-  select(-ngram) %>% 
-  distinct() %>% 
+  select(topic,ngram,isbn) %>%
+  distinct() %>%
+  group_by(topic,ngram) %>%
+  summarize(n=n(), per_dis=n()/sum(dy.ls), .groups="drop") %>%
+  arrange(desc(per_dis)) %>% 
+  slice_head(n=15) %>%
+  gt::gt() %>%
+  gt::tab_header(title="most frequently matched topic terms")
+  
+nmatched_dis <- exact_matches.df %>% pull(isbn) %>% unique() %>% length
+
+exact_matches.df %<>% 
+  select(topic,isbn) %>% 
+  distinct() %>%
+  mutate(value=TRUE, coding_src="exact")
+
+exact_matches.df %>%
   count(topic) %>%
   ungroup() %>%
-  
   separate_wider_delim(topic,names=c("dimension","category"),delim=":") -> topic_sum.df 
 
 topic_sum.df %<>% 
@@ -681,35 +721,55 @@ topic_sum.df %<>%
   mutate(p=n/sum(dy.ls)) %>%
   ungroup()
 
+lower_q <- .15 
+coded_isbns.df %<>% 
+  bind_rows(exact_matches.df)
+
 {topic_sum.df%>%
   ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
   geom_col(position=position_dodge2(width=1)) +
   geom_text(position=position_dodge2(width=1), vjust=1) +
   theme(legend.position="none") + 
-  facet_wrap(vars(dimension), scales="free_x")} %>% plotly::ggplotly()
+  facet_wrap(vars(dimension), scales="free_x") +
+  labs(x="percent of dissertations that contain topic-seed terms")
+  } %>% plotly::ggplotly()
+
+{topic_sum.df%>%
+  filter(p>lower_q) %>%
+  ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
+  geom_col(position=position_dodge2(width=1)) +
+  geom_text(position=position_dodge2(width=1), vjust=1) +
+  theme(legend.position="none") + 
+  facet_wrap(vars(dimension), scales="free_x") +
+  labs(x="percent of dissertations that contain topic-seed terms, excluding rare topics")
+  } %>% plotly::ggplotly()
 
 topic_sum.df %>% 
   group_by(dimension) %>%
   gt::gt() %>%
   gt::fmt_percent(columns="p")
 
-rm(topic_sum.df)
+rm(lower_q,exact_matches.df)
 ```
 
 ## Topic Models
 
 ```{r keyword-assisted-topics}
-
-#requireNamespace("quanteda")
+requireNamespace("quanteda")
 requireNamespace("keyATM")
+
+topic_lower_q <- .15
+unseeded_topics <- 3
+seed_prior_strength <- .95
+n_subj_categories <- 5
+lower_q <-  topic_lower_q
+upper_q <- .9
+exclude_dim <- c("claim")
 
 combined_tf_idf_stemmed.df %>% 
   group_by(ngram) %>%
   summarize(n=n()) %>%
   mutate(p=n/sum(dy.ls)) -> ngram_diss_ct.df
-
-lower_q <- .025 
-upper_q <- .975
 
 core_ngrams.df  <-
   ngram_diss_ct.df %>%
@@ -727,23 +787,40 @@ core_dfm <-
   cast_dfm(document=document,term=term,value=value)
 
 keyATM_docs <- keyATM::keyATM_read(texts = core_dfm)
-summary(keyATM_docs)
 
-  
-seeds.df %>% 
-  filter(!stringr::str_starts(topic,"epi:")) %>%
+excluded_topics<- topic_sum.df %>%
+  filter(p<topic_lower_q) %>% 
+  select(dimension,category) %>% 
+  transmute(topic=paste(dimension,category,sep=":"))
+
+excluded_areas <- topic_sum.df %>%
+    filter(dimension %in% exclude_dim) %>%
+      transmute(topic=paste(dimension,category,sep=":"))
+
+excluded_subjects <- topic_sum.df %>%
+ filter(dimension=="subj") %>% 
+ arrange(desc(p)) %>% 
+ slice_tail(n=-1*n_subj_categories ) %>%
+ select(dimension,category) %>% 
+ transmute(topic=paste(dimension,category,sep=":"))
+
+seeded_topics.ls <- seeds.df %>% 
+  anti_join(bind_rows(excluded_topics,excluded_subjects, excluded_areas), by ="topic") %>%
   group_by(`topic`) %>% 
   summarise(ngram_list=list(ngram)) %>% 
   pmap( function(topic,ngram_list) { x<-list(); x[[topic]] <- ngram_list; x} ) %>% 
-  list_flatten() -> seeds.ls
+  list_flatten() 
 
-key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seeds.ls)
+key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, 
+                                      keywords = seeded_topics.ls)
 key_viz
 
-suppressMessages(lda_key <- keyATM::keyATM(
+suppressMessages(
+  lda_key <- keyATM::keyATM(
   docs              = keyATM_docs,    # text input
-  no_keyword_topics = 5,              # number of topics without keywords
-  keywords          = seeds.ls,       # keywords
+  no_keyword_topics = unseeded_topics,              # number of topics without keywords
+  keywords          = seeded_topics.ls,       # keywords
+  priors            = list(beta_s=seed_prior_strength),
   model             = "base",         # select the model
 ))
 
@@ -751,8 +828,7 @@ lda_key %>% keyATM::plot_modelfit()
 ```
 
 ```{r key-atm-results}
-
-lda_key %>% keyATM::top_words()  %>%
+lda_key %>% keyATM::top_words() %>%
   gt::gt() %>% 
   gt::tab_header("Top words for each topic")
   
@@ -766,7 +842,6 @@ lda_key %>% keyATM::top_docs(n=5) %>%
   gt::gt() %>%
   gt::tab_header("Top dissertations in each topic")
 
-
 {lda_key %>% keyATM::plot_topicprop(
   n = 5,
   show_topic = NULL,
@@ -774,17 +849,34 @@ lda_key %>% keyATM::top_docs(n=5) %>%
   label_topic = NULL,
   order = "proportion")}[["figure"]] %>%
   plotly::ggplotly()
-
-
 ```
 
-# Author Characteristics
+# Bi-variate analysis
 
-```{r gender-coding}
-diss_cleaned_plus_gender.df <- diss_cleaned.df %>% 
-  mutate(given=  str_split_i(Authors,pattern=",",2)
-         %>% str_squish() %>% 
-           str_split_i(pattern="[:space:]",1)) 
+```{r coalesce-topic-codings}
+coded_isbns_wide.df <- coded_isbns.df %>%
+  select(-coding_src) %>%
+  filter(value) %>%
+  distinct()  %>% 
+  pivot_wider(values_from=value, names_from=topic, values_fill=FALSE)
 
-diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions()
+diss_coded_complete.df <-diss_cleaned_plus_gender.df %>% 
+  left_join(coded_isbns_wide.df, by="isbn")
 ```
+
+
+```{r}
+
+diss_coded_complete.df %>%
+  group_by(`meth:qual`) %>%
+  count(`subj:inequality`)
+
+diss_coded_complete.df %>% 
+  group_by(`meth:qual`) %>%
+  summarize(pr_female=mean(og_pr_F, na.rm=TRUE))
+
+diss_coded_complete.df %>% 
+  group_by(`meth:quant`) %>%
+  summarize(pr_female=mean(og_pr_F, na.rm=TRUE))
+```
+
