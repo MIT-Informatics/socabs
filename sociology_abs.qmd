@@ -25,6 +25,41 @@ requireNamespace("reshape2")
 requireNamespace("topicmodels")
 ```
 
+```{r global-processiong-options}
+DOSTEM <- FALSE
+```
+
+```{r retrieve-expertcodings}
+if (!file.exists("data/coded_abstracts.xlsx") || 
+    !file.exists("data/ngram_seeds.xlsx")   || TRUE
+    ) {
+requireNamespace("googledrive")
+folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
+
+filels <- googledrive::drive_ls(folderid)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="abstracts_hand_coding") %>% pull(`id`),
+  path = "data/coded_abstracts",
+  type= "xlsx",
+  overwrite=TRUE)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="socabs_topic_seeds") %>% pull(`id`),
+  path = "data/ngram_seeds",
+  type= "xlsx",
+  overwrite=TRUE)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="stems_and_stops") %>% pull(`id`),
+  path = "data/stems_and_stops",
+  type= "xlsx",
+  overwrite=TRUE)
+
+ rm(folderid, filels)
+}
+```
+
 ```{r, load-abs}
 abs1.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.xls")
 abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
@@ -74,49 +109,44 @@ rm(diss_meta.df)
 ```
 
 ```{r tokenize}
-mystop<-c("i.e","ie","e.g","eg","u.", as.character(1:100),
-      "a", "about", "above", "after", "again",  
-"am", "an", "and", "any", "are", "aren't", "as", "at", "be", 
-"because", "been", "before", "being", "below", "between", "both", 
-"but", "by", 
-"do", "does", "doing", "don't", "during", 
-"each",  "for", "from", "had", "hadn't", "has", 
-"hasn't", "have", "haven't", "having", "he", "he'd", "he'll", 
-"he's", "her", "here", "here's", "hers", "herself", "him", "himself", 
-"his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", 
-"in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "no", "nor", 
-"not", "of", "off", "on", "or", "ought", 
-"our", "ours", "ourselves", "out", "over", "own", "same", "shan't", 
-"so",  "such", "than", "that", "that's", "the", "this", "those", "through", 
-"to", "too", "under", "until", "up", "very", "was", "wasn't",  "where", "where's", "which")
+# subset of the snowball stopwords
 
-other_stop <- get_stopwords()[["word"]]
+minimal_stopwords <-
+  c("a",  "am", "an", "and", "any", "are", "aren't", "as", "at", "be","but", "by",  "did", "didn't", 
+"do", "does", "doesn't", "doing", "don't", "down", "during", 
+"each", "for", "from", "further", "had", "hadn't", "has", 
+"hasn't", "have", "haven't", "having", "how", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "my", "myself",  "of", "on",  "or", "other",  "so", "than", "that", "that's", "the","their", "they", "them", "then", "there", "there's", "these", "this", "how", "to", "too",  "was", "wasn't", "when", "when's", "where", "where's", "which", "while", "will", "with", "won't")
 
 combined_tidy.df <-  diss_cleaned.df %>%
   select(isbn,Abstract,Title,identifierKeywords) %>%
   unite(col="Clean_combined", sep=" ", remove=TRUE, na.rm=TRUE,
         Abstract,Title,identifierKeywords) %>%
-  mutate(Clean_combined=str_replace_all(Clean_combined, "U\\.S\\.","USA")) %>%
-  mutate(Clean_combined=str_replace_all(Clean_combined, "[-\\)\\(\\&\"/]"," ")) %>%
-  mutate(Clean_combined=str_replace_all(Clean_combined, "[^a-zA-Z \\.]", ""))  %>% 
-  mutate(Clean_combined=str_squish(Clean_combined)) %>% 
+  mutate(Clean_combined =
+           str_replace_all(Clean_combined, "U\\.S\\.","USA")) %>%
+  mutate(Clean_combined =
+           str_replace_all(Clean_combined, "[-\\)\\(\\&\"/]"," ")) %>%
+  mutate(Clean_combined =
+           str_replace_all(Clean_combined, "[^a-zA-Z \\.']", ""))  %>% 
+  mutate(Clean_combined =
+           str_squish(Clean_combined)) %>% 
   unnest_tokens(ngram, "Clean_combined", token = "skip_ngrams", n = 2,k=1,
-                stopwords=mystop)  %>%
-  #mutate(ngram = textstem::stem_strings(ngram, language="english")) %>%
+                stopwords=minimal_stopwords)  %>%
   mutate(ngram = str_squish(ngram)) %>% 
   filter(!str_detect(ngram,"\\.")) %>%
   filter(ngram!="")
+
+if (DOSTEM) {
+  combined_tidy.df %<>%
+     mutate(ngram = textstem::stem_strings(ngram, language="english"))
+}
 
 combined_tf_idf.df <- 
   combined_tidy.df %>% 
   count(ngram,isbn) %>%
     bind_tf_idf(ngram, isbn, n)
-
-rm(mystop,other_stop)
 ```
 
-```{r denoise}
-
+```{r post-stop-and-stem}
 stop_ngrams <- c( 
 "associated with", 
 "interviews with",  
@@ -146,7 +176,6 @@ stop_ngrams <- c(
 "findings study", 
 "people who", 
 "relationships with", 
-"study examines", 
 "these results", 
 "their their", 
 "these studies", 
@@ -159,10 +188,8 @@ stop_ngrams <- c(
 "along with", 
 "these two",
 "with more", 
-"dissertation examine", 
 "students their",  
 "their identities", 
-"chapter explores", 
 "their health", 
 "their parents", 
 "were likely", 
@@ -287,7 +314,8 @@ stop_ngrams <- c(
 "methods approach", 
 "months ethnographic", 
 "months fieldwork", 
-"their experience", "their relationships", 
+"their experience", 
+"their relationships", 
 "third empirical", 
 "with political", "with students", "years ethnographic", "across all", 
 "across groups", "among adults", "children their", 
@@ -352,7 +380,7 @@ stop_ngrams <- c(
 "genderwatch"
 )
 
-stop_post_tokens<- c("with", "their", "social", "these", "dissertation", "study", 
+stop_post_tokens<- c("with", "", "social", "these", "dissertation", "study", 
 "research", "more", "they", "chapter",  
  "also", "three",  "who", 
 "first",  "were",  "findings", 
@@ -374,6 +402,9 @@ stop_post_tokens<- c("with", "their", "social", "these", "dissertation", "study"
 "et al")
 
 stop_post.df <- tibble(ngram=c(stop_post_tokens, stop_ngrams))
+stop_post_minimal.df <- tibble(ngram=c("with"))
+
+combined_tf_idf_stemmed.df <- combined_tf_idf.df
 rm(stop_post_tokens,stop_ngrams)
 ```
 
@@ -382,16 +413,14 @@ rm(stop_post_tokens,stop_ngrams)
 ## Dissertations by Controlled Classifications
 
 ```{r controlled-meta-clean}
-
 diss_cleaned.df %>% 
   rename(term=classification_clean) %>%
   select(isbn, term, pubyear_clean) %>% 
-  unnest(cols=c(term))  %>%
-  filter(term !="sociology")-> diss_class_tidy.df
+  unnest(cols=c(term)) -> diss_class_tidy.df
 
 ndis <- sum(dy.ls)
-lower_q <- .01
-upper_q <- 1
+lower_q <- .05
+upper_q <- .8
 
 {diss_class_tidy.df %>% 
   count(term, sort=TRUE) %>%
@@ -406,7 +435,6 @@ upper_q <- 1
 {diss_class_tidy.df %>% 
   filter(pubyear_clean < 2024) %>%
   count(term, pubyear_clean, sort=TRUE) %>%
-  filter(term !="sociology") %>%
   rowwise() %>%
   mutate(p=n/ndis,
          p_year=n/dy.ls[[as.character(pubyear_clean)]]) %>%
@@ -424,7 +452,6 @@ rm(diss_class_tidy.df, lower_q, upper_q)
 ## Dissertations by Author-Assigned Topics
 
 ```{r au-topics}
-
 stop_topics.df <- tibble(term=c("y","genderwatch"))
 
 diss_cleaned.df %>% 
@@ -433,7 +460,7 @@ diss_cleaned.df %>%
   unnest(cols=c(term))  %>%
   anti_join(stop_topics.df,by="term")-> diss_au_id_tidy.df
 
-lower_q <- .01 
+lower_q <- .025
 upper_q <- 1
 
 {diss_au_id_tidy.df %>% 
@@ -452,33 +479,25 @@ rm(diss_au_id_tidy.df, stop_topics.df)
 ## Dissertations by Terminology
 
 ```{r terms-dis-frequencies}
-
 unc_doc_freq.df <-
-  combined_tidy.df %>% 
+  combined_tf_idf_stemmed.df %>% 
   count(ngram,isbn) %>%
   ungroup() %>%
   count(ngram)
 
-suppressWarnings(
-  (
-    unc_doc_freq.df %>%
-      ggplot(aes(x = n)) + geom_histogram(bins = 100) + scale_y_log10() +
-      labs(title="Distribution of dissertations that include a term from abs,title, keywords")
-  ) %>% plotly::ggplotly()
-)
+lower_q <- .10 
+upper_q <- .8
 
 unc_doc_freq.df  %>% 
-    anti_join(stop_post.df,by="ngram") %>%
+  mutate(p=n/sum(dy.ls)) %>%
+        filter(p>= lower_q,
+         p<= upper_q) %>%
       slice_max(order_by=n, n=200) %>%
       rename(freq=n,word=ngram) %>%
       ggwordcloud::ggwordcloud2(size=.8) +
       labs(title="terms appearing in most dissertations - excluding stopwords") 
 
-lower_q <- .10 
-upper_q <- 1
-
 {unc_doc_freq.df %>% 
-  anti_join(stop_post.df,by="ngram") %>%
   mutate(p = n/sum(dy.ls),
          ngram=fct_reorder(ngram,p)) %>%
   filter(p>= lower_q,
@@ -504,9 +523,8 @@ rm(unc_doc_freq.df, lower_q, upper_q)
 ## Distribution of Terminology Across Corpus
 
 ```{r uncontrolled-terms-frequencies}
-
 unc_ngram_freq.df <- 
-  combined_tidy.df %>% 
+  combined_tf_idf_stemmed.df %>% 
   count(ngram,sort=TRUE) 
 
 suppressWarnings(
@@ -518,7 +536,6 @@ suppressWarnings(
 )
 
 unc_ngram_freq.df  %>% 
-      anti_join(stop_post.df,by="ngram") %>%
       slice_max(order_by = n,n=200) %>%
       rename(freq=n,word=ngram) %>%
       ggwordcloud::ggwordcloud2(size=.8) +
@@ -544,7 +561,7 @@ nterms <- 5
 ndiss <- 100
 
 topterms.df <-
-  combined_tf_idf.df %>% 
+  combined_tf_idf_stemmed.df %>% 
   group_by(isbn) %>%
   slice_max(order_by=tf_idf, n=nterms) 
 
@@ -580,33 +597,6 @@ rm(nterms,ndiss, topterms.df, topdis.df, distinctive_diss.df)
 
 # Topic Coding
 
-```{r retrieve-expertcodings}
-
-if (!file.exists("data/coded_abstracts.xlsx") || 
-    !file.exists("data/ngram_seeds.xlsx") ||
-    TRUE
-    ) {
-requireNamespace("googledrive")
-folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
-
-filels <- googledrive::drive_ls(folderid)
-
-googledrive::drive_download(
-  file = filels %>% filter(name=="abstracts_hand_coding") %>% pull(`id`),
-  path = "data/coded_abstracts",
-  type= "xlsx",
-  overwrite=TRUE)
-
-googledrive::drive_download(
-  file = filels %>% filter(name=="socabs_topic_seeds") %>% pull(`id`),
-  path = "data/ngram_seeds",
-  type= "xlsx",
-  overwrite=TRUE)
-
- rm(folderid, filels)
-}
-```
-
 ```{r create-dictionary}
 coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
 
@@ -622,7 +612,7 @@ seeds_from_codes.df <- coded_abs.df %>%
   filter(ngram!='')
 
 seeds_from_ngrams.df <- 
-  suppressMessages( readxl::read_excel("data/ngram_seeds.xlsx") ) %>%
+  suppressMessages( readxl::read_excel("data/ngram_seeds.xlsx") )%>%
   rename(topic=Topic,ngram=Ngram) %>% select(topic,ngram)
 
 seeds_from_ngrams.df %<>% 
@@ -637,18 +627,13 @@ seeds.df <- bind_rows(seeds_from_codes.df, seeds_from_ngrams.df) %>%
            str_squish()
            ) %>%
   distinct()
-  
-seeds.df %>% 
-  group_by(`topic`) %>% summarise(ngram_list=list(ngram)) %>% 
-  pmap( function(topic,ngram_list) { x<-list(); x[[topic]] <- ngram_list; x} ) %>% 
-  list_flatten() -> seeds.ls
 
 rm(seeds_from_codes.df, seeds_from_ngrams.df)
 ```
 
 ## Hand Coded Abstracts
 
-```{r}
+```{r hand-coded}
 hand_codes_tmp.df <-
   coded_abs.df %>% select(contains(':'),EpiStyle_type) %>% 
   filter( if_any(everything(), ~ !is.na(.x)) )
@@ -669,15 +654,16 @@ hand_codes_tmp.df %>% select(-EpiStyle_type) %>%
     separate_wider_delim(name,names=c("dimension","category"),delim=":") %>%
     bind_rows(epi_tot.df)  -> hand_code_tot.df
 
-hand_code_tot.df %>%
+{hand_code_tot.df %>%
     mutate(dimension = as.factor(dimension), category=as.factor(category)) %>%
     ggplot(aes(y=n,x=dimension,  fill=category,label=category)) +
     geom_col(position=position_dodge2()) +
-    geom_label(position=position_dodge2(width=1), vjust=1) +
+    geom_text(position=position_dodge2(width=1), vjust=1) +
     theme(legend.position="none") + 
-    facet_wrap(vars(dimension), scales="free_x")
+    facet_wrap(vars(dimension), scales="free_x")} %>%
+  plotly::ggplotly()
   
-  rm(epi_tot.df, hand_codes_tmp.df, hand_code_tot.df)
+  #rm(epi_tot.df, hand_codes_tmp.df, hand_code_tot.df) 
 ```
 
 \
@@ -687,7 +673,7 @@ hand_code_tot.df %>%
 ```{r exact-matches}
 exact_matches.df <- 
   left_join(seeds.df,
-            combined_tidy.df %>% distinct(),
+            combined_tf_idf_stemmed.df %>% distinct(),
             relationship="many-to-many",
             by = "ngram"
             )
@@ -707,12 +693,12 @@ topic_sum.df %<>%
   mutate(p=n/sum(dy.ls)) %>%
   ungroup()
 
-topic_sum.df%>%
+{topic_sum.df%>%
   ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
   geom_col(position=position_dodge2(width=1)) +
-  geom_label(position=position_dodge2(width=1), vjust=1) +
+  geom_text(position=position_dodge2(width=1), vjust=1) +
   theme(legend.position="none") + 
-  facet_wrap(vars(dimension), scales="free_x")
+  facet_wrap(vars(dimension), scales="free_x")} %>% plotly::ggplotly()
 
 topic_sum.df %>% 
   group_by(dimension) %>%
@@ -729,13 +715,13 @@ rm(topic_sum.df)
 #requireNamespace("quanteda")
 requireNamespace("keyATM")
 
-combined_tf_idf.df %>% 
+combined_tf_idf_stemmed.df %>% 
   group_by(ngram) %>%
   summarize(n=n()) %>%
   mutate(p=n/sum(dy.ls)) -> ngram_diss_ct.df
 
-lower_q <- .01 
-upper_q <- 1
+lower_q <- .025 
+upper_q <- .975
 
 core_ngrams.df  <-
   ngram_diss_ct.df %>%
@@ -743,7 +729,7 @@ core_ngrams.df  <-
   select("ngram") %>%
   bind_rows(seeds.df %>% select(ngram))  %>%
   distinct() %>%
-  left_join(combined_tf_idf.df %>% select(ngram,isbn,n)) %>%
+  left_join(combined_tf_idf_stemmed.df %>% select(ngram,isbn,n)) %>%
   na.omit() %>%
   distinct()
 
@@ -755,12 +741,20 @@ core_dfm <-
 keyATM_docs <- keyATM::keyATM_read(texts = core_dfm)
 summary(keyATM_docs)
 
+  
+seeds.df %>% 
+  filter(!stringr::str_starts(topic,"epi:")) %>%
+  group_by(`topic`) %>% 
+  summarise(ngram_list=list(ngram)) %>% 
+  pmap( function(topic,ngram_list) { x<-list(); x[[topic]] <- ngram_list; x} ) %>% 
+  list_flatten() -> seeds.ls
+
 key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, keywords = seeds.ls)
 key_viz
 
 suppressMessages(lda_key <- keyATM::keyATM(
   docs              = keyATM_docs,    # text input
-  no_keyword_topics = 20,              # number of topics without keywords
+  no_keyword_topics = 5,              # number of topics without keywords
   keywords          = seeds.ls,       # keywords
   model             = "base",         # select the model
 ))
@@ -798,5 +792,11 @@ lda_key %>% keyATM::top_docs(n=5) %>%
 
 # Author Characteristics
 
-```{r}
+```{r gender-coding}
+diss_cleaned_plus_gender.df <- diss_cleaned.df %>% 
+  mutate(given=  str_split_i(Authors,pattern=",",2)
+         %>% str_squish() %>% 
+           str_split_i(pattern="[:space:]",1)) 
+
+diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions()
 ```
