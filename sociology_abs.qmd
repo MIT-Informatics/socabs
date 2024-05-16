@@ -753,6 +753,35 @@ rm(lower_q,exact_matches.df)
 ```
 
 ## Topic Models
+```{r lda-helper}
+
+# tidy helper for keyATM
+tidy.keyATM_output<-function(x, matrix="phi", long=FALSE) {
+  if (matrix=="phi") {
+    res  <- x[["phi"]] %>%
+        tibble::as_tibble(rownames=NA) %>%
+        tibble::rownames_to_column("topic") 
+    if(long) {
+      res <-  res %>% 
+        tidyr::pivot_longer(!topic) %>%
+        dplyr::mutate(term=paste("phi",topic,name,sep="+"),param="phi" ) %>%
+        dplyr::relocate(term,estimate=value,topic,word=name)
+    }
+  } else {
+    res <- lda_key[["theta"]]  %>%
+        tibble::as_tibble(rownames=NA) %>%
+        tibble::rownames_to_column("document")
+        if(long) {
+    res <-  res %>% tidyr::pivot_longer(!document) %>%
+        dplyr::mutate(term=paste("theta",document,name,sep="+"),param="theta" ) %>%
+        dplyr::relocate(term,estimate=value,document,topic=name)
+    }
+  }
+  res
+}
+```
+
+
 
 ```{r keyword-assisted-topics}
 requireNamespace("quanteda")
@@ -851,6 +880,17 @@ lda_key %>% keyATM::top_docs(n=5) %>%
   plotly::ggplotly()
 ```
 
+```{r document-threhold}
+
+# documents with n% of words on specific topic
+tidy(lda_key, matrix="theta", long=TRUE) %>%
+  arrange(desc(estimate)) %>% 
+  filter(estimate > .10)  %>%
+  count(topic) %>%
+  gt::gt()
+  
+```
+
 # Bi-variate analysis
 
 ```{r coalesce-topic-codings}
@@ -865,7 +905,7 @@ diss_coded_complete.df <-diss_cleaned_plus_gender.df %>%
 ```
 
 
-```{r}
+```{r cross-comparison}
 
 diss_coded_complete.df %>%
   group_by(`meth:qual`) %>%
@@ -879,4 +919,6 @@ diss_coded_complete.df %>%
   group_by(`meth:quant`) %>%
   summarize(pr_female=mean(og_pr_F, na.rm=TRUE))
 ```
+
+
 
