@@ -118,7 +118,7 @@ diss_cleaned_plus_gender.df <- diss_cleaned.df %>%
          %>% str_squish() %>% 
            str_split_i(pattern="[:space:]",1)) 
 
-diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions()
+diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions(dict= "wgen2")
 
 diss_cleaned_plus_gender.df %>% 
   summarize(opengender::gender_mean(og_details,simplify_output="row"))
@@ -644,7 +644,7 @@ seeded_topics.ls <- seeds.df %>%
 key_viz <- keyATM::visualize_keywords(docs = keyATM_docs, 
                                       keywords = seeded_topics.ls)
 key_viz
-VVi
+
 suppressMessages(
   lda_key <- keyATM::keyATM(
   docs              = keyATM_docs,    # text input
@@ -691,15 +691,20 @@ tidy(lda_key, matrix="theta", long=TRUE) %>%
   arrange(desc(estimate)) %>% 
   filter(estimate > .2)  %>%
   count(topic) %>%
-  gt::gt()
+  gt::gt() %>%
+  gt::tab_header("number of dissertations with => 20% words from given topic")
 
-
-tidy(lda_key, matrix="theta", long=TRUE) %>%
+lda_matches.df <- tidy(lda_key, matrix="theta", long=TRUE) %>%
   arrange(desc(estimate)) %>% 
-  filter(estimate > .2) %>%
-  rowwise() %>%
-  mutate(isbn=document)
-  
+    filter(estimate > .2) %>%
+    select(isbn=document, topic=topic) %>%
+    mutate(topic=str_replace(topic,"\\d+_","")) %>%
+    mutate(topic=str_replace(topic,"^Other","subj:other")) %>%
+    distinct() %>%
+    mutate(value=TRUE, coding_src="LDA")
+
+coded_isbns.df %<>% filter(coding_src!="LDA")
+coded_isbns.df %<>% bind_rows(lda_matches.df)
 ```
 
 # Bi-variate analysis
@@ -715,20 +720,94 @@ diss_coded_complete.df <-diss_cleaned_plus_gender.df %>%
   left_join(coded_isbns_wide.df, by="isbn")
 ```
 
+```{r cumulative-matches}
+coded_isbns.df %>%
+  filter(value) %>%
+  select(-coding_src) %>%
+  distinct() %>%
+  count(topic,sort=TRUE) %>%
+  ungroup() %>%
+  separate_wider_delim(topic,names=c("dimension",
+                                     "category"),delim=":") ->   all_topic_sum.df 
+
+
+all_topic_sum.df %<>% 
+  group_by(dimension) %>%
+  mutate(p=n/sum(dy.ls)) %>%
+  ungroup()
+
+all_topic_sum.df
+
+
+{all_topic_sum.df%>%
+  filter(p>lower_q) %>%
+  ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
+  geom_col(position=position_dodge2(width=1)) +
+  geom_text(position=position_dodge2(width=1), vjust=1) +
+  theme(legend.position="none") + 
+  facet_wrap(vars(dimension), scales="free_x") +
+  labs(x="percent of dissertations in each category, excluding rare")
+  } %>% plotly::ggplotly()
+
+```
 
 ```{r cross-comparison}
 
-diss_coded_complete.df %>%
-  group_by(`meth:qual`) %>%
-  count(`subj:inequality`)
 
-diss_coded_complete.df %>% 
-  group_by(`meth:qual`) %>%
-  summarize(pr_female=mean(og_pr_F, na.rm=TRUE))
+coded_isbns_gender.df <- 
+  coded_isbns.df %>%
+  ungroup() %>%
+  filter(value) %>%
+  select(!coding_src) %>%
+  distinct() %>%
+  left_join(diss_cleaned_plus_gender.df %>% select(isbn, og_pr_F), by="isbn") %>%
+   separate_wider_delim(topic,names=c("dimension",
+                                     "category"),delim=":")
 
-diss_coded_complete.df %>% 
-  group_by(`meth:quant`) %>%
-  summarize(pr_female=mean(og_pr_F, na.rm=TRUE))
+
+{coded_isbns_gender.df %>%
+  group_by(dimension,category) %>%
+  summarize(n=n(),p=n/sum(dy.ls), pr_F=mean(og_pr_F,na.rm=TRUE))%>%
+  filter(p>lower_q) %>%
+  ggplot(aes(y=pr_F,x=dimension,fill=category,label=category)) +
+  geom_col(position=position_dodge2(width=1)) +
+  geom_text(position=position_dodge2(width=1), vjust=1) +
+  theme(legend.position="none") + 
+  facet_wrap(vars(dimension), scales="free_x") +
+  labs(x="gender ratio of  each category, excluding rare")} %>%
+  plotly::ggplotly()
+  
+
+
+coded_isbns_wide.df %>% xtabs(data =  .,
+      formula = ~ `meth:qual` + `claim:strong`)  %>%
+      ftable() %>% as_tibble() %>% gt::gt()
+
+coded_isbns_wide.df %>% xtabs(data =  .,
+      formula = ~ `meth:quant` + `claim:strong`)  %>%
+      ftable() %>% as_tibble() %>% gt::gt()
+
+
+coded_isbns_wide.df %>% xtabs(data =  .,
+      formula = ~ `meth:quant` + `subj:econ`)  %>%
+      ftable() %>% as_tibble() %>% gt::gt()
+
+coded_isbns_wide.df %>% xtabs(data =  .,
+      formula = ~ `meth:qual` + `subj:econ`) %>%
+      ftable() %>% as_tibble() %>% gt::gt()
+
+
+coded_isbns_wide.df %>% xtabs(data =  .,
+      formula = ~ `meth:quant` + `subj:gender`)  %>%
+      ftable() %>% as_tibble() %>% gt::gt()
+
+
+coded_isbns_wide.df %>% xtabs(data =  .,
+      formula = ~ `meth:qual` + `subj:gender`) %>%
+      ftable() %>% as_tibble() %>% gt::gt()
+
+
+coded_isbns_wid
 ```
 
 
