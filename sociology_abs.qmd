@@ -850,6 +850,9 @@ coded_isbns_wide.df %>%
   geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
   scale_x_discrete(limits = c("econ", "qualitative"))
 
+
+vcd::mosaic( ~ `subj:econ` + `meth:qual` +`claim:strong`, data = coded_isbns_wide.df, shade = FALSE)
+
 ```
 
 
