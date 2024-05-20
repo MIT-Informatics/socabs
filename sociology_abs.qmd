@@ -777,8 +777,6 @@ coded_isbns_gender.df <-
   labs(x="gender ratio of  each category, excluding rare")} %>%
   plotly::ggplotly()
   
-
-
 # coded_isbns_wide.df %>% xtabs(data =  .,
 #       formula = ~ `meth:qual` + `claim:strong`)  %>%
 #       ftable() %>% as_tibble() %>% gt::gt()
@@ -826,12 +824,32 @@ coded_isbns_wide.df %>%
     n=n()
   )
 
-
-coded_isbns.df %>%
-  filter(str_starts(topic,"epi")) %>%
-  filter(value) %>%
-  distinct() %>% View()
 ```
 
+```{r}
+
+library(ggalluvial)
+
+coded_isbns_wide.df %>%
+  count(`subj:econ`,`meth:qual`,`claim:strong`) %>%
+   mutate(`subj:econ`=as.factor(`subj:econ`) 
+          %>% fct_recode( econ="TRUE",other_subj="FALSE"),
+          `meth:qual`=as.factor(`meth:qual`)  %>%
+            fct_recode( qualitative="TRUE",other_meth="FALSE"),
+         `claim`=as.factor(`claim:strong`)  %>%
+           fct_recode( strong="TRUE",not_strong="FALSE")
+          ) %>%
+  as.data.frame() %>%
+  ggplot(aes(
+    y=n,
+    axis1=`subj:econ`,
+    axis2=`meth:qual`,
+  )) +
+  geom_alluvium(aes(fill = claim)) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("econ", "qualitative"))
+
+```
 
 
