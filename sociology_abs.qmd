@@ -779,35 +779,58 @@ coded_isbns_gender.df <-
   
 
 
-coded_isbns_wide.df %>% xtabs(data =  .,
-      formula = ~ `meth:qual` + `claim:strong`)  %>%
-      ftable() %>% as_tibble() %>% gt::gt()
-
-coded_isbns_wide.df %>% xtabs(data =  .,
-      formula = ~ `meth:quant` + `claim:strong`)  %>%
-      ftable() %>% as_tibble() %>% gt::gt()
+# coded_isbns_wide.df %>% xtabs(data =  .,
+#       formula = ~ `meth:qual` + `claim:strong`)  %>%
+#       ftable() %>% as_tibble() %>% gt::gt()
 
 
-coded_isbns_wide.df %>% xtabs(data =  .,
-      formula = ~ `meth:quant` + `subj:econ`)  %>%
-      ftable() %>% as_tibble() %>% gt::gt()
+coded_isbns_wide.df %>% 
+  group_by(`meth:qual`) %>%
+  summarize(
+    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
+    n=n()
+  )
 
-coded_isbns_wide.df %>% xtabs(data =  .,
-      formula = ~ `meth:qual` + `subj:econ`) %>%
-      ftable() %>% as_tibble() %>% gt::gt()
+coded_isbns_wide.df %>% 
+  group_by(`claim:strong`) %>%
+  summarize(
+    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
+    n=n()
+  )
+
+coded_isbns_wide.df %>% 
+  group_by(`meth:theory`) %>%
+  summarize(
+    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
+    n=n()
+  )
+
+coded_isbns_wide.df %>% 
+  group_by(`epi:pos`) %>%
+  summarize(
+    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
+    n=n()
+  )
+
+coded_isbns_wide.df %>% 
+  group_by(`epi:activist`) %>%
+  summarize(
+    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
+    n=n()
+  )
+
+coded_isbns_wide.df %>% 
+  group_by(`epi:util`) %>%
+  summarize(
+    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
+    n=n()
+  )
 
 
-coded_isbns_wide.df %>% xtabs(data =  .,
-      formula = ~ `meth:quant` + `subj:gender`)  %>%
-      ftable() %>% as_tibble() %>% gt::gt()
-
-
-coded_isbns_wide.df %>% xtabs(data =  .,
-      formula = ~ `meth:qual` + `subj:gender`) %>%
-      ftable() %>% as_tibble() %>% gt::gt()
-
-
-coded_isbns_wid
+coded_isbns.df %>%
+  filter(str_starts(topic,"epi")) %>%
+  filter(value) %>%
+  distinct() %>% View()
 ```
 
 
