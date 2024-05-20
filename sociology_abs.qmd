@@ -31,7 +31,7 @@ DOSTEM <- FALSE
 
 ```{r retrieve-expertcodings}
 if (!file.exists("data/coded_abstracts.xlsx") || 
-    !file.exists("data/ngram_seeds.xlsx")   || TRUE
+    !file.exists("data/ngram_seeds.xlsx") || TRUE
     ) {
 requireNamespace("googledrive")
 folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
@@ -419,11 +419,47 @@ stop_post_tokens<- c("with", "", "social", "these", "dissertation", "study",
 "co", "xa", "five", "re", "al", "et", 
 "et al")
 
-stop_post.df <- tibble(ngram=c(stop_post_tokens, stop_ngrams))
-stop_post_minimal.df <- tibble(ngram=c("with"))
+stop_post.df <- readxl::read_excel("./data/stems_and_stops.xlsx",
+                                       sheet = "stopwords")
 
-combined_tf_idf_stemmed.df <- combined_tf_idf.df
+stem_raw.df <- readxl::read_excel("./data/stems_and_stops.xlsx",
+                                       sheet = "groupwords")
+
+stem_post.df <- stem_raw.df %>%
+  dplyr::rowwise() %>%
+  mutate( root = stringr::str_split_1(`groups`, pattern="; ")[[1]],
+          stem = stringr::str_split(`groups`, pattern="; ")) %>%
+  dplyr::ungroup() %>%
+  tidyr::unnest(stem) %>%
+  dplyr::filter(root!=stem) %>% 
+  select(!groups)
+  
+stop_post_minimal.df <- tibble(ngram=c("with"))
 rm(stop_post_tokens,stop_ngrams)
+```
+
+```{r}
+combined_tf_idf_stemmed.df <- combined_tf_idf.df
+
+stem_string <- function(x,delim=" ") {
+  longword.df <- stringr::str_split(x,delim)[[1]] %>%
+    as_tibble()
+  
+  longword.df %<>% left_join(stem_post.df, by=c(value="stem"))
+  longword.df %<>% mutate(result=coalesce(root,value))
+  longword.df %>% pull(result) %>% paste(collapse=delim)
+}
+
+stem_string_V<- Vectorize(stem_string)
+
+combined_tf_idf_stemmed_only.df <- combined_tf_idf.df %>%
+  slice_sample(n=1000) %>%
+  rowwise() %>%
+  mutate(ngram=stem_string_V(ngram)) %>%
+  ungroup()
+
+combined_tf_idf_stemmed.df <- combined_tf_idf.df %>%
+  anti_join(stop_post.df, by="ngram")
 ```
 
 # Distributions of topics (unclustered)
@@ -609,7 +645,6 @@ rm(nterms,ndiss, topterms.df, topdis.df, distinctive_diss.df)
 coded_isbns.df <- NULL
 ```
 
-
 ```{r hand-coded}
 hand_codes_tmp.df <-
   coded_abs.df %>% select(isbn,contains(':'),EpiStyle_type) %>% 
@@ -692,7 +727,6 @@ exact_matches.df <-
             relationship="many-to-many",
             by = "ngram"
             )
-
 
 exact_matches.df %>% 
   select(topic,ngram,isbn) %>%
@@ -795,6 +829,8 @@ lower_q <-  topic_lower_q
 upper_q <- .9
 exclude_dim <- c("claim")
 
+#stemming and grouping
+
 combined_tf_idf_stemmed.df %>% 
   group_by(ngram) %>%
   summarize(n=n()) %>%
@@ -854,6 +890,8 @@ suppressMessages(
 ))
 
 lda_key %>% keyATM::plot_modelfit()
+keyATM::semantic_coherence(x, docs, n = 10)
+
 ```
 
 ```{r key-atm-results}
