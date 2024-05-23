@@ -123,7 +123,8 @@ diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions(dict= "wgen2
 diss_cleaned_plus_gender.df %>% 
   summarize(opengender::gender_mean(og_details,simplify_output="row"))
 ```
-#Text prep 
+
+#Text prep
 
 ```{r tokenize}
 # subset of the snowball stopwords
@@ -333,6 +334,7 @@ rm(unc_doc_freq.df, lower_q, upper_q)
 ```
 
 ## Distribution of Terminology Across Corpus
+
 ```{r uncontrolled-terms-frequencies}
 unc_ngram_freq.df <- 
   combined_tf_idf_stemmed.df %>% 
@@ -402,6 +404,7 @@ rm(nterms,ndiss, topterms.df, topdis.df, distinctive_diss.df)
 # Topic Coding
 
 ## Hand Coded Abstracts
+
 ```{r coding-setup}
 coded_isbns.df <- NULL
 ```
@@ -548,6 +551,7 @@ rm(lower_q,exact_matches.df)
 ```
 
 ## Topic Models
+
 ```{r lda-helper}
 
 # tidy helper for keyATM
@@ -575,8 +579,6 @@ tidy.keyATM_output<-function(x, matrix="phi", long=FALSE) {
   res
 }
 ```
-
-
 
 ```{r keyword-assisted-topics}
 requireNamespace("quanteda")
@@ -854,5 +856,3 @@ coded_isbns_wide.df %>%
 vcd::mosaic( ~ `subj:econ` + `meth:qual` +`claim:strong`, data = coded_isbns_wide.df, shade = FALSE)
 
 ```
-
-
