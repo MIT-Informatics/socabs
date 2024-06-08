@@ -106,17 +106,20 @@ diss_cleaned.df <- diss_meta.df %>%
            clean_text() %>% 
            unique() %>%
            list(), 
-          au_identifier_terms_clean =
+         au_identifier_terms_clean =
            str_split_1(identifierKeywords,pattern = ",") %>%
            clean_text() %>% 
            unique() %>%
            list(),
-          abstract_clean = 
-            clean_text(Abstract)
+        abstract_clean = 
+          clean_text(Abstract),
+        title_clean =
+          clean_text(Title)
+        
   ) %>% 
     ungroup() %>%
     select(isbn, Authors, classification_clean, subject_terms_clean, pubyear_clean,
-           Abstract,Title,identifierKeywords, au_identifier_terms_clean, abstract_clean)
+           Abstract,Title,identifierKeywords, au_identifier_terms_clean, title_clean, abstract_clean)
 
 diss_cleaned.df %>%
   count(pubyear_clean) %>%
@@ -142,7 +145,7 @@ diss_cleaned_plus_gender.df %>%
   summarize(opengender::gender_mean(og_details,simplify_output="row"))
 ```
 
-#Text prep
+## Text prep
 
 ```{r tokenize}
 # subset of the snowball stopwords
@@ -154,14 +157,17 @@ minimal_stopwords <-
 "hasn't", "have", "haven't", "having", "how", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "my", "myself",  "of", "on",  "or", "other",  "so", "than", "that", "that's", "the","their", "they", "them", "then", "there", "there's", "these", "this", "how", "to", "too",  "was", "wasn't", "when", "when's", "where", "where's", "which", "while", "will", "with", "won't")
 
 combined_tidy.df <-  diss_cleaned.df %>%
-  select(isbn,Abstract,Title,identifierKeywords) %>%
+  select(isbn,abstract_clean,title_clean,au_identifier_terms_clean) %>%
   unite(col="Clean_combined", sep=" ", remove=TRUE, na.rm=TRUE,
-        Abstract,Title,identifierKeywords) %>%
+        abstract_clean,title_clean,au_identifier_terms_clean) %>%
   unnest_tokens(ngram, "Clean_combined", token = "skip_ngrams", n = 2,k=1,
                 stopwords=minimal_stopwords)  %>%
   mutate(ngram = str_squish(ngram)) %>% 
-  filter(!str_detect(ngram,"\\.")) %>%
-  filter(ngram!="")
+  filter(str_length(ngram)>1)
+
+#%>%
+#  filter(!str_detect(ngram,"\\.")) %>%
+#  filter(ngram!="")
 ```
 
 ```{r post-stop-and-stem}
@@ -558,6 +564,45 @@ topic_sum.df %>%
   gt::fmt_percent(columns="p")
 
 rm(lower_q,exact_matches.df)
+```
+
+## Data Source Matches
+
+Determine geographical scope by implication from referenced data source.
+
+```{r data_matches}
+dataset_codes.df <- readxl::read_excel("./data/stems_and_stops.xlsx",
+                                       sheet = "datasets") %>%
+      mutate(phrase_clean=clean_text(phrase))
+
+dataset_codes_ls.df <-
+  dataset_codes.df %>%
+  group_by(topic) %>%
+  summarise(phrase_list=list(phrase_clean), .groups="drop") %>%
+  rowwise() %>% 
+ # mutate(reg=paste0("((^| )",phrase_list,"( |$))",collapse="|")) %>% 
+ # much slower -- in this case, we can assume that dataset names don't come
+ # at very beginning of end
+  mutate(reg=paste0("( ",phrase_list," )",collapse="|")) %>% 
+  ungroup()
+
+data_matches.df<- purrr::pmap(dataset_codes_ls.df,
+    function(topic,reg,...) {
+              diss_cleaned_plus_gender.df %>% 
+                filter(stringr::str_detect(abstract_clean, reg)) %>% 
+                select(isbn) %>% 
+                mutate(topic=topic)
+    } 
+) %>% purrr::list_rbind() %>%
+  distinct() %>% 
+  mutate(coding_src="data")
+
+coded_isbns.df %<>% 
+  bind_rows(data_matches.df)
+
+data_matches.df %>% 
+  count(topic) %>%
+  gt::gt()
 ```
 
 ## Topic Models
