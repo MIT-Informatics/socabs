@@ -642,7 +642,7 @@ requireNamespace("keyATM")
 topic_lower_q <- .15
 unseeded_topics <- 3
 seed_prior_strength <- .95
-n_subj_categories <- 5
+n_subj_categories <- 12
 lower_q <-  topic_lower_q
 upper_q <- .9
 exclude_dim <- c("claim")
