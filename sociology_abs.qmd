@@ -67,6 +67,18 @@ abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
 diss_meta.df <- bind_rows(abs1.df, abs2.df)
 rm("abs1.df","abs2.df")
 
+### text cleaning
+
+clean_text<-function(x) {
+  x %>%  
+    stringr::str_replace_all("U\\.S\\.","USA") %>% 
+    stringr::str_to_lower() %>% 
+    stringr::str_replace_all("[-\\)\\(\\&\"/]"," ") %>%
+    stringr::str_replace_all("[^a-zA-Z \\.']", "")  %>% 
+    stringr::str_squish()
+}
+
+
 # NOTE:
 # Columns in source overal with each other -- only selected columns used
 #  - all duplicates: classification, subjectClassifications, classiifcationCOdes, majorClassificationsCodes
@@ -85,20 +97,26 @@ diss_cleaned.df <- diss_meta.df %>%
   rowwise() %>%
   mutate(classification_clean = 
           str_split_1(classification ,pattern = ",") %>% 
-           str_squish() %>%
+          str_squish() %>%
           str_replace("^[0-9]+ ","") %>%
-          str_to_lower() %>% unique() %>% list() ,
+          clean_text()  %>%
+          unique() %>%
+          list() ,
          subject_terms_clean = str_split_1(subjectTerms,pattern = ",") %>%
-           str_squish() %>% str_to_lower() %>% unique() %>%
+           clean_text() %>% 
+           unique() %>%
            list(), 
           au_identifier_terms_clean =
            str_split_1(identifierKeywords,pattern = ",") %>%
-           str_squish() %>% str_to_lower() %>% unique() %>%
-           list()
+           clean_text() %>% 
+           unique() %>%
+           list(),
+          abstract_clean = 
+            clean_text(Abstract)
   ) %>% 
     ungroup() %>%
     select(isbn, Authors, classification_clean, subject_terms_clean, pubyear_clean,
-           Abstract,Title,identifierKeywords, au_identifier_terms_clean)
+           Abstract,Title,identifierKeywords, au_identifier_terms_clean, abstract_clean)
 
 diss_cleaned.df %>%
   count(pubyear_clean) %>%
@@ -139,14 +157,6 @@ combined_tidy.df <-  diss_cleaned.df %>%
   select(isbn,Abstract,Title,identifierKeywords) %>%
   unite(col="Clean_combined", sep=" ", remove=TRUE, na.rm=TRUE,
         Abstract,Title,identifierKeywords) %>%
-  mutate(Clean_combined =
-           str_replace_all(Clean_combined, "U\\.S\\.","USA")) %>%
-  mutate(Clean_combined =
-           str_replace_all(Clean_combined, "[-\\)\\(\\&\"/]"," ")) %>%
-  mutate(Clean_combined =
-           str_replace_all(Clean_combined, "[^a-zA-Z \\.']", ""))  %>% 
-  mutate(Clean_combined =
-           str_squish(Clean_combined)) %>% 
   unnest_tokens(ngram, "Clean_combined", token = "skip_ngrams", n = 2,k=1,
                 stopwords=minimal_stopwords)  %>%
   mutate(ngram = str_squish(ngram)) %>% 
