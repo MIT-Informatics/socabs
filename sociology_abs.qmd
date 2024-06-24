@@ -773,43 +773,20 @@ coded_isbns_wide.df <- coded_isbns.df %>%
   distinct()  %>% 
   pivot_wider(values_from=value, names_from=topic, values_fill=FALSE)
 
-diss_coded_complete.df <-diss_cleaned_plus_gender.df %>% 
-  left_join(coded_isbns_wide.df, by="isbn")
-```
-
-```{r cumulative-matches}
-coded_isbns.df %>%
+coded_isbns_wide_nest.df<- coded_isbns.df %>%
   filter(value) %>%
-  select(-coding_src) %>%
+  select(isbn,topic) %>%
   distinct() %>%
-  count(topic,sort=TRUE) %>%
-  ungroup() %>%
-  separate_wider_delim(topic,names=c("dimension",
-                                     "category"),delim=":") ->   all_topic_sum.df 
-
-
-all_topic_sum.df %<>% 
-  group_by(dimension) %>%
-  mutate(p=n/sum(dy.ls)) %>%
-  ungroup()
-
-all_topic_sum.df
-
-
-{all_topic_sum.df%>%
-  filter(p>lower_q) %>%
-  ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
-  geom_col(position=position_dodge2(width=1)) +
-  geom_text(position=position_dodge2(width=1), vjust=1) +
-  theme(legend.position="none") + 
-  facet_wrap(vars(dimension), scales="free_x") +
-  labs(x="percent of dissertations in each category, excluding rare")
-  } %>% plotly::ggplotly()
-
-```
-
-```{r cross-comparison}
-
+  separate_wider_delim(topic,delim=":", names=c("dimension","category")) %>%
+  pivot_wider(names_from="dimension", values_from=category,
+              values_fn=list) %>% 
+  left_join(diss_cleaned_plus_gender.df %>% select(isbn,og_pr_F), by="isbn") 
+  
+coded_isbns_wide_unpacked.df <-
+  coded_isbns_wide_nest.df%>% select(isbn,subj,meth,scope,og_pr_F) %>%
+  unnest(cols=c(subj)) %>%
+  unnest(cols=c(meth)) %>%
+  unnest(cols=c(scope)) 
 
 coded_isbns_gender.df <- 
   coded_isbns.df %>%
@@ -821,10 +798,85 @@ coded_isbns_gender.df <-
    separate_wider_delim(topic,names=c("dimension",
                                      "category"),delim=":")
 
+coded_isbns.df %>%
+  filter(value) %>%
+  select(-coding_src) %>%
+  distinct() %>%
+  count(topic,sort=TRUE) %>%
+  ungroup() %>%
+  separate_wider_delim(topic,names=c("dimension",
+                                     "category"),delim=":") ->   all_topic_sum.df 
+all_topic_sum.df %<>% 
+  group_by(dimension) %>%
+  mutate(p=n/sum(dy.ls)) %>%
+  ungroup()
+```
+
+```{r cumulative-matches}
+
+all_topic_sum.df
+
+{all_topic_sum.df%>%
+  filter(p>lower_q) %>%
+  ggplot(aes(y=p,x=dimension,fill=category,label=category)) +
+  geom_col(position=position_dodge2(width=1)) +
+  geom_text(position=position_dodge2(width=1), vjust=1) +
+  theme(legend.position="none") + 
+  facet_wrap(vars(dimension), scales="free_x") +
+  labs(x="ALL CODING METHODS: percent of dissertations in each category, excluding rare")
+  } %>% plotly::ggplotly()
+
+```
+
+```{r cross-comparison}
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj,meth,scope) %>%
+  summarize(.groups="drop",
+       n = length(unique(isbn)),
+       pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
+            ) %>%
+  DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption ="subj x meth x scope frequencies"
+    )
+    
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj) %>% 
+  mutate(subj_total = length(unique(isbn)))  %>%
+  group_by(subj,meth) %>%
+  summarize(.groups="drop",
+       n = length(unique(isbn)),
+       percent_of_subject = n/unique(subj_total),
+       pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
+            ) -> coded_subj_freq.df 
+
+coded_subj_freq.df %>%
+  mutate(display=glue::glue('{round(percent_of_subject,2)}% ({n})')) %>%
+  select(subj,meth,display) %>%
+  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
+  gt::gt() %>%
+  gt::tab_header("percentage of each subject employing methodology") %>%
+  gt::cols_label(subj="") %>%
+    gt::tab_caption("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
+
+coded_subj_freq.df %>%
+  mutate(display=glue::glue('{round(pr_F,2)} ({n})')) %>%
+  select(subj,meth,display) %>%
+  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
+  gt::gt() %>%
+  gt::tab_header("Female proportion by subject & method") %>%
+  gt::cols_label(subj="") %>% 
+  gt::tab_caption("Categories are overlapping. Number of dissertations in category in parentheses. ")
+
+
 
 {coded_isbns_gender.df %>%
   group_by(dimension,category) %>%
-  summarize(n=n(),p=n/sum(dy.ls), pr_F=mean(og_pr_F,na.rm=TRUE))%>%
+  summarize(n=n(),p=n/sum(dy.ls), pr_F=mean(og_pr_F,na.rm=TRUE),
+            .groups="drop")%>%
   filter(p>lower_q) %>%
   ggplot(aes(y=pr_F,x=dimension,fill=category,label=category)) +
   geom_col(position=position_dodge2(width=1)) +
@@ -834,52 +886,34 @@ coded_isbns_gender.df <-
   labs(x="gender ratio of  each category, excluding rare")} %>%
   plotly::ggplotly()
   
-# coded_isbns_wide.df %>% xtabs(data =  .,
-#       formula = ~ `meth:qual` + `claim:strong`)  %>%
-#       ftable() %>% as_tibble() %>% gt::gt()
 
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj) %>% 
+  mutate(subj_total = length(unique(isbn)))  %>%
+  group_by(subj,meth) %>%
+  summarize(.groups="drop",
+       n = length(unique(isbn)),
+       percent_of_subject = n/unique(subj_total),
+       pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
+            ) -> coded_subj_freq.df 
 
-coded_isbns_wide.df %>% 
-  group_by(`meth:qual`) %>%
-  summarize(
-    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
-    n=n()
-  )
+coded_subj_freq.df %>%
+  mutate(display=glue::glue('{round(percent_of_subject,2)}% ({n})')) %>%
+  select(subj,meth,display) %>%
+  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
+  gt::gt() %>%
+  gt::tab_header("percentage of each subject employing methodology") %>%
+  gt::cols_label(subj="") %>%
+    gt::tab_caption("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
 
-coded_isbns_wide.df %>% 
-  group_by(`claim:strong`) %>%
-  summarize(
-    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
-    n=n()
-  )
-
-coded_isbns_wide.df %>% 
-  group_by(`meth:theory`) %>%
-  summarize(
-    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
-    n=n()
-  )
-
-coded_isbns_wide.df %>% 
-  group_by(`epi:pos`) %>%
-  summarize(
-    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
-    n=n()
-  )
-
-coded_isbns_wide.df %>% 
-  group_by(`epi:activist`) %>%
-  summarize(
-    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
-    n=n()
-  )
-
-coded_isbns_wide.df %>% 
-  group_by(`epi:util`) %>%
-  summarize(
-    across(c(`subj:inequality`,`subj:gender`,`subj:econ`), ~ sum(.x)),
-    n=n()
-  )
+coded_subj_freq.df %>%
+  mutate(display=glue::glue('{round(pr_F,2)} ({n})')) %>%
+  select(subj,meth,display) %>%
+  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
+  gt::gt() %>%
+  gt::tab_header("Female proportion by subject & method") %>%
+  gt::cols_label(subj="") %>% 
+  gt::tab_caption("Categories are overlapping. Number of dissertations in category in parentheses. ")
 
 ```
 
