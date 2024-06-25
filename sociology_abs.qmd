@@ -61,6 +61,55 @@ googledrive::drive_download(
 coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
 ```
 
+```{r load-and-merge}
+# retrieve and merge abstracts data
+rawdir <- "data/raw"
+mergedfile <- "data/diss_meta.RDS"
+
+retrieve_raw_data <- function(dest) {
+  requireNamespace("googledrive")
+  folderid <- 'https://drive.google.com/drive/folders/1BFMQkwj24zwH3uTIFmrCnp32dkfY807E'
+  
+  filels <- googledrive::drive_ls(folderid)
+ 
+  purrr::pwalk(filels, function(name,id,...) {
+    googledrive::drive_download(
+       file = id,
+       path = file.path(dest,name),
+      overwrite=TRUE)
+    })
+}
+
+merge_raw_data<-function(dest) { 
+   xls.ls <- dir(destdir,pattern="\\.xls", full.names = TRUE)
+   ris.ls <- dir(destdir,pattern="\\.ris", full.names = TRUE)
+   
+   merged_xls.df <- purrr::map(xls.ls, readxl::read_excel) %>% 
+     purrr::list_rbind()
+   
+   
+   merged_ris.df <- purrr::map(ris.ls, revtools::read_bibliography) %>% 
+     purrr::list_rbind()
+   
+   merged.df <- merged_xls.df %>% 
+     left_join( merged_ris.df %>% select(advisor=author,StoreId=accession,
+                      organization=publisher, place = "pubplace"),
+                by = "StoreId" )
+   
+   merged.df
+}
+
+if (!file.exists(mergedfile)) {
+  if (length(dir(destdir, pattern = "\\.ris$"))==0) {
+      retrieve_raw_data(destdir)
+  }
+  diss_meta_full.df <- merge_raw_data(destdir)  
+  saveRDS(diss_meta_full.df, file=mergedfile)
+} 
+
+diss_meta_full.df <- readRDS(mergedfile)
+```
+
 ```{r, load-abs}
 abs1.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.xls")
 abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
@@ -945,3 +994,4 @@ coded_isbns_wide.df %>%
 vcd::mosaic( ~ `subj:econ` + `meth:qual` +`claim:strong`, data = coded_isbns_wide.df, shade = FALSE)
 
 ```
+
