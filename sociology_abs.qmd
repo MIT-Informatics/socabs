@@ -789,7 +789,7 @@ lda_key %>% keyATM::top_docs(n=5)%>%
   plotly::ggplotly()
 ```
 
-```{r document-threhold}
+```{r document-threshold}
 
 # documents with n% of words on specific topic
 
@@ -833,9 +833,9 @@ coded_isbns_wide_nest.df<- coded_isbns.df %>%
   
 coded_isbns_wide_unpacked.df <-
   coded_isbns_wide_nest.df%>% select(isbn,subj,meth,scope,og_pr_F) %>%
-  unnest(cols=c(subj)) %>%
-  unnest(cols=c(meth)) %>%
-  unnest(cols=c(scope)) 
+  unnest(cols=c(subj), keep_empty =TRUE) %>%
+  unnest(cols=c(meth), keep_empty =TRUE) %>%
+  unnest(cols=c(scope) , keep_empty =TRUE) 
 
 coded_isbns_gender.df <- 
   coded_isbns.df %>%
@@ -903,11 +903,11 @@ coded_isbns_wide_unpacked.df %>%
             ) -> coded_subj_freq.df 
 
 coded_subj_freq.df %>%
-  mutate(display=glue::glue('{round(percent_of_subject,2)}% ({n})')) %>%
+  mutate(display=glue::glue('{round(percent_of_subject,2)} ({n})')) %>%
   select(subj,meth,display) %>%
   pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
   gt::gt() %>%
-  gt::tab_header("percentage of each subject employing methodology") %>%
+  gt::tab_header("proportion of each subject employing methodology") %>%
   gt::cols_label(subj="") %>%
     gt::tab_caption("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
 
@@ -946,24 +946,6 @@ coded_isbns_wide_unpacked.df %>%
        pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
             ) -> coded_subj_freq.df 
 
-coded_subj_freq.df %>%
-  mutate(display=glue::glue('{round(percent_of_subject,2)}% ({n})')) %>%
-  select(subj,meth,display) %>%
-  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
-  gt::gt() %>%
-  gt::tab_header("percentage of each subject employing methodology") %>%
-  gt::cols_label(subj="") %>%
-    gt::tab_caption("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
-
-coded_subj_freq.df %>%
-  mutate(display=glue::glue('{round(pr_F,2)} ({n})')) %>%
-  select(subj,meth,display) %>%
-  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
-  gt::gt() %>%
-  gt::tab_header("Female proportion by subject & method") %>%
-  gt::cols_label(subj="") %>% 
-  gt::tab_caption("Categories are overlapping. Number of dissertations in category in parentheses. ")
-
 ```
 
 ```{r}
@@ -994,4 +976,3 @@ coded_isbns_wide.df %>%
 vcd::mosaic( ~ `subj:econ` + `meth:qual` +`claim:strong`, data = coded_isbns_wide.df, shade = FALSE)
 
 ```
-
