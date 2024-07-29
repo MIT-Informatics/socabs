@@ -900,9 +900,23 @@ coded_isbns_wide_unpacked.df %>%
        n = length(unique(isbn)),
        percent_of_subject = n/unique(subj_total),
        pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
-            ) -> coded_subj_freq.df 
+            ) -> meth_subj_freq.df 
 
-coded_subj_freq.df %>%
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj) %>% 
+  mutate(subj_total = length(unique(isbn)))  %>%
+  group_by(subj,scope) %>%
+  summarize(.groups="drop",
+       n = length(unique(isbn)),
+       percent_of_subject = n/unique(subj_total),
+       pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
+            ) -> scope_subj_freq.df 
+
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj) %>% 
+  summarize(subject_total = length(unique(isbn)))  -> subject_totals.df
+
+meth_subj_freq.df %>%
   mutate(display=glue::glue('{round(percent_of_subject,2)} ({n})')) %>%
   select(subj,meth,display) %>%
   pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
@@ -911,7 +925,7 @@ coded_subj_freq.df %>%
   gt::cols_label(subj="") %>%
     gt::tab_caption("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
 
-coded_subj_freq.df %>%
+meth_subj_freq.df %>%
   mutate(display=glue::glue('{round(pr_F,2)} ({n})')) %>%
   select(subj,meth,display) %>%
   pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
@@ -922,11 +936,13 @@ coded_subj_freq.df %>%
 
 
 
-{coded_isbns_gender.df %>%
+coded_isbns_gender.df %>%
   group_by(dimension,category) %>%
   summarize(n=n(),p=n/sum(dy.ls), pr_F=mean(og_pr_F,na.rm=TRUE),
-            .groups="drop")%>%
-  filter(p>lower_q) %>%
+            .groups="drop") -> category_gender.df
+  
+{ category_gender.df %>%
+    filter(p>lower_q) %>%
   ggplot(aes(y=pr_F,x=dimension,fill=category,label=category)) +
   geom_col(position=position_dodge2(width=1)) +
   geom_text(position=position_dodge2(width=1), vjust=1) +
@@ -946,6 +962,135 @@ coded_isbns_wide_unpacked.df %>%
        pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
             ) -> coded_subj_freq.df 
 
+```
+
+## preprint formatted tables
+
+```{r preprint-formatted-tables}
+subject_totals.df
+
+# proportions table
+subject_totals.df %>% 
+  filter(subj!="NA") %>%
+  filter(!str_starts(subj,"other")) %>%
+  left_join(by="subj", 
+    meth_subj_freq.df %>%
+    mutate(display=percent_of_subject) %>%
+    select(subj,meth,display) %>%
+    pivot_wider(names_from=meth,values_from=display, values_fill=0) %>%
+    select(!"NA")) %>%
+  left_join(by="subj", 
+    scope_subj_freq.df %>%
+    mutate(display=percent_of_subject) %>%
+    select(subj,scope,display) %>%
+    pivot_wider(names_from=scope,values_from=display, values_fill=0) %>%
+    select(!"NA")
+    ) %>%
+  gt::gt() %>%
+  gt::tab_header("Proportion of each subject by methodology and scope") %>%
+  gt::cols_label(subj="") %>%
+  gt::cols_hide(c("theoretical")) %>%
+  gt::tab_spanner(
+    label = "methodology",
+    columns = c(
+      "empirical","longitudinal","qual","quant","theory"
+    )
+  ) %>%
+  gt::tab_spanner(
+    label = "scope",
+    columns = c(
+      "us","world",
+    )
+  ) %>%
+  gt::cols_label(subject_total="(N)") %>%
+  gt::fmt_number(decimals=2) %>%
+  gt::fmt_number(columns=subject_total,decimals=0) %>%
+  gt::data_color(
+     columns = !c("subj","subject_total"),
+     direction = "row",
+     method="numeric",
+     domain=c(0,1),
+     palette = "Oranges",
+     na_color = "white"
+   ) %>%
+  gt::tab_footnote("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
+
+coded_isbns_gender.df %>%
+  filter(dimension=="subj") %>%
+  group_by(category) %>%
+  summarize(subject_gender=mean(og_pr_F,na.rm=TRUE),
+            .groups="drop") %>%
+  rename(subj=category) -> subject_genders.df
+
+
+# gender table
+subject_totals.df %>% 
+  filter(subj!="NA") %>%
+  filter(!str_starts(subj,"other")) %>%
+  left_join(by="subj", subject_genders.df) %>%
+  left_join(by="subj", 
+    meth_subj_freq.df %>%
+    mutate(display=pr_F) %>%
+    select(subj,meth,display) %>%
+    pivot_wider(names_from=meth,values_from=display, values_fill=0) %>%
+    select(!"NA")) %>%
+  left_join(by="subj", 
+    scope_subj_freq.df %>%
+    mutate(display=pr_F) %>%
+    select(subj,scope,display) %>%
+    pivot_wider(names_from=scope,values_from=display, values_fill=0) %>%
+    select(!"NA")
+    ) %>%
+  bind_rows(
+    category_gender.df %>% 
+     filter(dimension %in% c("meth","scope")) %>% 
+      select(category,pr_F) %>%
+      pivot_wider(names_from=category,values_from=pr_F, values_fill=0) %>%
+      mutate(subj="")
+  ) %>%
+  gt::gt() %>%
+  gt::tab_header("Female proportion for each subject by method and scope") %>%
+  gt::cols_label(subj="") %>%
+  gt::cols_hide(c("theoretical")) %>%
+  gt::tab_spanner(
+    label = "methodology",
+    columns = c(
+      "empirical","longitudinal","qual","quant","theory"
+    )
+  ) %>%
+  gt::tab_spanner(
+    label = "scope",
+    columns = c(
+      "us","world",
+    )
+  ) %>%
+  gt::cols_label(subject_total="(N)") %>%
+  gt::cols_label(subject_gender="(subject mean)") %>%
+  gt::fmt_number(decimals=2) %>%
+  gt::fmt_number(columns=subject_total,decimals=0) %>%
+  gt::sub_missing() %>%
+  gt::data_color(
+     columns = !c("subj","subject_total"),
+     direction = "row",
+     method="numeric",
+     domain=c(0,1),
+     palette = "RdBu",
+     na_color = "white"
+   ) %>% 
+  gt::tab_row_group(
+    label = "",
+    rows = subj !="",
+  ) %>%
+  gt::tab_row_group(
+    label = "Category Means",
+    rows = subj =="",
+  ) %>%
+  gt::row_group_order(groups = c("", "Category Means")) %>%
+  gt::tab_footnote("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
+
+
+
+  
 ```
 
 ```{r}
