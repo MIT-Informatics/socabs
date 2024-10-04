@@ -1,0 +1,425 @@
+---
+title: "Sociology Abstracts"
+format: html
+editor: visual
+toc: TRUE
+code-tools: TRUE
+code-fold: TRUE
+embed-resources: TRUE
+---
+
+# Setup
+
+Load data from proquest on 2020-2024-02-01 sociology department dissertations in English. Clean and tokenise as 2-skip-1 ngrams
+
+```{r setup, include=FALSE}
+set.seed(seed=NULL)
+library("tidyverse", quietly=TRUE, warn.conflicts=FALSE)
+library("magrittr",include.only="%<>%", quietly=TRUE, warn.conflicts=FALSE)
+library("tidytext", quietly=TRUE, warn.conflicts=FALSE)
+requireNamespace("textstem")
+requireNamespace("plotly")
+requireNamespace("DT")
+requireNamespace("ggwordcloud")
+requireNamespace("reshape2")
+requireNamespace("topicmodels")
+```
+
+```{r global-processing-options}
+```
+
+```{r retrieve-expertcodings}
+if (!file.exists("data/coded_abstracts.xlsx") || 
+    !file.exists("data/ngram_seeds.xlsx") || TRUE
+    ) {
+requireNamespace("googledrive")
+folderid <- googledrive::as_id("https://drive.google.com/drive/folders/1eFat4mCoRZX22gPLTj9w5Bn63U3q71yo")
+
+filels <- googledrive::drive_ls(folderid)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="abstracts_hand_coding") %>% pull(`id`),
+  path = "data/coded_abstracts",
+  type= "xlsx",
+  overwrite=TRUE)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="socabs_topic_seeds") %>% pull(`id`),
+  path = "data/ngram_seeds",
+  type= "xlsx",
+  overwrite=TRUE)
+
+googledrive::drive_download(
+  file = filels %>% filter(name=="stems_and_stops") %>% pull(`id`),
+  path = "data/stems_and_stops",
+  type= "xlsx",
+  overwrite=TRUE)
+
+ rm(folderid, filels)
+}
+
+coded_abs.df <- readxl::read_excel("data/coded_abstracts.xlsx")
+```
+
+```{r load-and-merge}
+# retrieve and merge abstracts data
+rawdir <- "data/raw"
+mergedfile <- "data/diss_meta.RDS"
+
+retrieve_raw_data <- function(dest) {
+  requireNamespace("googledrive")
+  folderid <- 'https://drive.google.com/drive/folders/1BFMQkwj24zwH3uTIFmrCnp32dkfY807E'
+  
+  filels <- googledrive::drive_ls(folderid)
+ 
+  purrr::pwalk(filels, function(name,id,...) {
+    googledrive::drive_download(
+       file = id,
+       path = file.path(dest,name),
+      overwrite=TRUE)
+    })
+}
+
+merge_raw_data<-function(dest) { 
+   xls.ls <- dir(destdir,pattern="\\.xls", full.names = TRUE)
+   ris.ls <- dir(destdir,pattern="\\.ris", full.names = TRUE)
+   
+   merged_xls.df <- purrr::map(xls.ls, readxl::read_excel) %>% 
+     purrr::list_rbind()
+   
+   
+   merged_ris.df <- purrr::map(ris.ls, revtools::read_bibliography) %>% 
+     purrr::list_rbind()
+   
+   merged.df <- merged_xls.df %>% 
+     left_join( merged_ris.df %>% select(advisor=author,StoreId=accession,
+                      organization=publisher, place = "pubplace"),
+                by = "StoreId" )
+   
+   merged.df
+}
+
+if (!file.exists(mergedfile)) {
+  if (length(dir(destdir, pattern = "\\.ris$"))==0) {
+      retrieve_raw_data(destdir)
+  }
+  diss_meta_full.df <- merge_raw_data(destdir)  
+  saveRDS(diss_meta_full.df, file=mergedfile)
+} 
+
+diss_meta_full.df <- readRDS(mergedfile)
+abs1.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.xls")
+abs2.df <- readxl::read_excel("data/ProQuestDocuments-2024-02-01.2.xls")
+diss_meta_small.df <- bind_rows(abs1.df, abs2.df)
+rm("abs1.df","abs2.df")
+```
+
+```{r, load-abs}
+### text cleaning
+
+clean_text<-function(x) {
+  x %>%  
+    stringr::str_replace_all("U\\.S\\.","USA") %>% 
+    stringr::str_to_lower() %>% 
+    stringr::str_replace_all("[-\\)\\(\\&\"/]"," ") %>%
+    stringr::str_replace_all("[^a-zA-Z \\.']", "")  %>% 
+    stringr::str_squish()
+}
+
+
+# NOTE:
+# Columns in source overall with each other -- only selected columns used
+#  - all duplicates: classification, subjectClassifications, classiifcationCOdes, majorClassificationsCodes
+# - subjectTerms appears to be an automated coarse recoding of the classification
+# - appears author assigned, duplicate columns: identifierKeywords, subjects
+#   apparently post-processed to add "GenderWatch" and "y" tags 
+
+diss_cleaned.df <- diss_meta_full.df %>% 
+  select(isbn, Authors, classification, subjectTerms, pubdate,
+         Abstract, Title, identifierKeywords, advisor, organization, place) %>%
+  mutate(classification = replace_na(classification,""),
+          subjectTerms = replace_na(subjectTerms,""),
+          advisor = replace_na(advisor,""),
+          organization = replace_na(organization,""),
+          place = replace_na(place,""),
+          identifierKeywords = replace_na(identifierKeywords,""),
+          pubyear_clean = year(as_date(pubdate,format="%Y"))
+         ) %>%
+  rowwise() %>%
+  mutate(classification_clean = 
+          str_split_1(classification ,pattern = ",") %>% 
+          str_squish() %>%
+          str_replace("^[0-9]+ ","") %>%
+          clean_text()  %>%
+          unique() %>%
+          list() ,
+         subject_terms_clean = str_split_1(subjectTerms,pattern = ",") %>%
+           clean_text() %>% 
+           unique() %>%
+           list(), 
+         au_identifier_terms_clean =
+           str_split_1(identifierKeywords,pattern = ",") %>%
+           clean_text() %>% 
+           unique() %>%
+           list(),
+        abstract_clean = 
+          clean_text(Abstract),
+        title_clean =
+          clean_text(Title),
+        advisor = str_squish(advisor),
+        organization = str_squish(organization),
+        place=str_squish(place),
+  ) %>% 
+    ungroup() %>%
+    mutate(splits=stringr::str_split(place,'--',n=2)) %>% rowwise() %>% mutate(country=str_squish(splits[[1]])) %>%
+    select(isbn, Authors, classification_clean, subject_terms_clean, pubyear_clean,
+           Abstract,Title,identifierKeywords, au_identifier_terms_clean, title_clean, abstract_clean, advisor, organization, country)
+
+diss_cleaned.df %<>%
+  filter(pubyear_clean>=2007,
+         country %in% c("United States","Canada"))
+
+diss_cleaned.df %>%
+  count(pubyear_clean) %>%
+  rename(year=pubyear_clean)-> dy.df
+dy.ls <- dy.df %>% pull(n)
+names(dy.ls) <- dy.df %>% pull(year)
+
+```
+
+# Author Characteristics
+## Gender
+```{r gender-coding}
+requireNamespace("opengender")
+
+# extract first name and match
+diss_cleaned_plus_gender.df <- diss_cleaned.df %>% 
+  mutate(given=  str_split_i(Authors,pattern=",",2)
+         %>% str_squish() %>% 
+           str_split_i(pattern="[:space:]",1)) 
+
+diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions(dict= "wgen2")
+
+diss_cleaned_plus_gender.df %>% 
+  summarize(opengender::gender_mean(og_details,simplify_output="row"))
+```
+```{r gender-trends}
+
+diss_cleaned_plus_gender.df %>% 
+  count(pubyear_clean) %>%
+  ggplot(aes(x=pubyear_clean,y=n,label=n)) +
+  geom_col() 
+  
+diss_cleaned_plus_gender.df %>% 
+  group_by(pubyear_clean) %>%
+  summarize(opengender::gender_mean(og_details,simplify_output="row")) %>%
+  ggplot(aes(x=pubyear_clean,y=prop_F)) +
+  geom_col() 
+
+```
+
+## Text prep
+
+```{r tokenize}
+# subset of the snowball stopwords
+
+minimal_stopwords <-
+  c("a",  "am", "an", "and", "any", "are", "aren't", "as", "at", "be","but", "by",  "did", "didn't", 
+"do", "does", "doesn't", "doing", "don't", "down", "during", 
+"each", "for", "from", "further", "had", "hadn't", "has", 
+"hasn't", "have", "haven't", "having", "how", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "my", "myself",  "of", "on",  "or", "other",  "so", "than", "that", "that's", "the","their", "they", "them", "then", "there", "there's", "these", "this", "how", "to", "too",  "was", "wasn't", "when", "when's", "where", "where's", "which", "while", "will", "with", "won't")
+
+combined_tidy.df <-  diss_cleaned.df %>%
+  select(isbn,abstract_clean,title_clean,au_identifier_terms_clean) %>%
+  unite(col="Clean_combined", sep=" ", remove=TRUE, na.rm=TRUE,
+        abstract_clean,title_clean,au_identifier_terms_clean) %>%
+  unnest_tokens(ngram, "Clean_combined", token = "skip_ngrams", n = 2,k=1,
+                stopwords=minimal_stopwords)  %>%
+  mutate(ngram = str_squish(ngram)) %>% 
+  filter(str_length(ngram)>1)
+
+#%>%
+#  filter(!str_detect(ngram,"\\.")) %>%
+#  filter(ngram!="")
+```
+
+```{r post-stop-and-stem}
+
+if (FALSE) {
+  combined_tidy.df %<>%
+     mutate(ngram = textstem::stem_strings(ngram, language="english"))
+}
+
+stop_post.df <- readxl::read_excel("./data/stems_and_stops.xlsx",
+                                       sheet = "stopwords")
+
+stem_raw.df <- readxl::read_excel("./data/stems_and_stops.xlsx",
+                                       sheet = "groupwords")
+
+stem_post.df <- stem_raw.df %>%
+  dplyr::rowwise() %>%
+  mutate( root = stringr::str_split_1(`group`, pattern="; ")[[1]],
+          stem = stringr::str_split(`group`, pattern="; ")) %>%
+  dplyr::ungroup() %>%
+  tidyr::unnest(stem) %>%
+  dplyr::filter(root!=stem) %>% 
+  select(!group)
+  
+stem_string <- function(x,delim=" ") {
+  longword.df <- stringr::str_split(x,delim)[[1]] %>%
+    as_tibble()
+  
+  longword.df %<>% left_join(stem_post.df, by=c(value="stem"))
+  longword.df %<>% mutate(result=coalesce(root,value))
+  longword.df %>% pull(result) %>% paste(collapse=delim)
+}
+
+stem_reg<-function(x, pattern, delim="; ") {
+  pattern_vec=str_split(pattern,delim)[[1]]
+  replace_target = paste0(" ",pattern_vec[1]," ")
+  replace_pattern = paste0("((^| )",pattern_vec[2:length(pattern_vec)],"($| ))",collapse="|")
+  str_replace_all(x,pattern=replace_pattern,replacement=replace_target) %>%
+  str_squish()
+}
+
+# 10000x faster than join version
+stem_string_reg <- function(x) {
+  
+  reglist <- stem_raw.df %>% pull(group)
+  cum <-x
+  for (g in reglist) {
+     cum <-  stem_reg(cum,g)
+  }
+  cum
+}
+
+#stem_string_reg(c("racial racialize race baiting","foo race", "bar gendered"))
+
+stem_string_V<- Vectorize(stem_string)
+
+combined_tidy_stem.df <- combined_tidy.df %>%
+  mutate(ngram=stem_string_reg(ngram)) %>%
+  ungroup()
+
+```
+
+```{r stopword}
+combined_tf_idf_stemmed.df <- 
+  combined_tidy.df %>% 
+  count(ngram,isbn) %>%
+    bind_tf_idf(ngram, isbn, n)
+
+combined_tf_idf_stemmed.df  %<>%
+  anti_join(stop_post.df, by="ngram")
+```
+
+# Distributions of topics (unclustered)
+
+## Dissertations by Controlled Classifications
+
+```{r controlled-meta-clean}
+diss_cleaned_plus_gender.df %>% 
+  rename(term=classification_clean) %>%
+  select(isbn, term, pubyear_clean,og_pr_F) %>% 
+  unnest(cols=c(term)) -> diss_class_tidy.df
+
+ndis <- sum(dy.ls)
+lower_q <- .05
+upper_q <- .55
+
+diss_class_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  mutate(p = n/sum(dy.ls)) %>%
+  filter(p>= lower_q ,
+         p <= upper_q ) %>%
+  pull(term) -> popterms.ls
+
+{diss_class_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  mutate(p = n/sum(dy.ls)) %>%
+  filter(term %in% popterms.ls) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age of dissertation assigned to controlled classifications")} %>% plotly::ggplotly()
+
+{diss_class_tidy.df %>% 
+  filter(pubyear_clean < 2024) %>%
+  count(term, pubyear_clean, sort=TRUE) %>%
+  rowwise() %>%
+  mutate(p=n/ndis,
+         p_year=n/dy.ls[[as.character(pubyear_clean)]]) %>%
+  filter(p_year >=  lower_q ,
+         p_year <=  upper_q ) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p_year))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age dissertations in assigned  classification over time") +
+  facet_wrap(vars(pubyear_clean))} %>% plotly::ggplotly() 
+
+diss_class_tidy.df %>% 
+  filter(term %in% popterms.ls) %>%
+  group_by(term,pubyear_clean) %>%
+  summarize(n=length(unique(isbn)), pr_F=round(mean(og_pr_F,na.rm=TRUE),digits=2),
+            .groups = "drop") %>%
+  rowwise() %>%
+  mutate(p_year=n/dy.ls[[as.character(pubyear_clean)]]) %>%
+  ungroup() %>%
+  filter(n>5) -> diss_class_year.df
+
+{diss_class_year.df %>%
+  ggplot(aes(x=pubyear_clean, y= pr_F, group= term, color=term)) +
+  geom_line() } %>% plotly::ggplotly()
+
+rm(diss_class_tidy.df, diss_class_year.df, lower_q, upper_q, popterms.ls)
+```
+
+## Dissertations by Author-Assigned Topics
+
+```{r au-topics}
+stop_topics.df <- tibble(term=c("y","genderwatch"))
+
+diss_cleaned_plus_gender.df %>% 
+  rename(term=au_identifier_terms_clean) %>%
+  select(isbn, term, pubyear_clean, og_pr_F) %>% 
+  unnest(cols=c(term))  %>%
+  anti_join(stop_topics.df,by="term") %>%
+  distinct() -> diss_au_id_tidy.df
+
+lower_q <- .025
+upper_q <- 1
+
+diss_au_id_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  mutate(p = n/sum(dy.ls)) %>%
+  filter(p>= lower_q ,
+         p <= upper_q ) %>%
+  pull(term) -> popterms.ls
+
+{diss_au_id_tidy.df %>% 
+  count(term, sort=TRUE) %>%
+  mutate(p = n/sum(dy.ls)) %>%
+  filter(p>= lower_q ,
+         p <= upper_q ) %>%
+  ggplot(aes(x=fct_reorder(term,p),y=p))+
+  geom_col() +
+  coord_flip() +
+  labs(x="%age of dissertation by author-assigned keywords")} %>% plotly::ggplotly()
+
+diss_au_id_tidy.df %>% 
+  filter(term %in% popterms.ls) %>%
+  group_by(term,pubyear_clean) %>%
+  summarize(n=length(unique(isbn)), pr_F=round(mean(og_pr_F,na.rm=TRUE),digits=2),
+            .groups = "drop") %>%
+  rowwise() %>%
+  mutate(p_year=n/dy.ls[[as.character(pubyear_clean)]]) %>%
+  ungroup() %>%
+  filter(n>5) -> diss_au_id_year.df
+
+{diss_au_id_year.df %>%
+  ggplot(aes(x=pubyear_clean, y= pr_F, group= term, color=term)) +
+  geom_line() } %>% plotly::ggplotly()
+
+rm(diss_au_id_tidy.df, stop_topics.df, lower_q, upper_q, popterms.ls)
+```
+
