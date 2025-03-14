@@ -188,7 +188,9 @@ names(dy.ls) <- dy.df %>% pull(year)
 ```
 
 # Author Characteristics
+
 ## Gender
+
 ```{r gender-coding}
 requireNamespace("opengender")
 
@@ -203,6 +205,7 @@ diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions(dict= "wgen2
 diss_cleaned_plus_gender.df %>% 
   summarize(opengender::gender_mean(og_details,simplify_output="row"))
 ```
+
 ```{r gender-trends}
 
 diss_cleaned_plus_gender.df %>% 
@@ -372,6 +375,14 @@ diss_class_tidy.df %>%
   geom_line() } %>% plotly::ggplotly()
 
 rm(diss_class_tidy.df, diss_class_year.df, lower_q, upper_q, popterms.ls)
+```
+
+## Dissertations by Institution
+
+```{r}
+ diss_cleaned_plus_gender.df %>% count(organization, sort=TRUE) %>% 
+   gt::gt()
+
 ```
 
 ## Dissertations by Author-Assigned Topics

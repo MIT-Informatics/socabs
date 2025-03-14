@@ -1,0 +1,69 @@
+---
+title: "Untitled"
+format: html
+editor: visual
+---
+
+```{r}
+coded_isbns.df
+```
+
+```{r contingencies-frequencies}
+coded_isbns_wide_nest.df<- coded_isbns.df %>%
+  filter(value) %>%
+  select(isbn,topic) %>%
+  distinct() %>%
+  separate_wider_delim(topic,delim=":", names=c("dimension","category")) %>%
+  pivot_wider(names_from="dimension", values_from=category,
+              values_fn=list) %>% 
+  left_join(diss_cleaned_plus_gender.df %>% select(isbn,og_pr_F), by="isbn") 
+  
+coded_isbns_wide_unpacked.df <-
+  coded_isbns_wide_nest.df%>% select(isbn,subj,meth,scope,og_pr_F) %>%
+  unnest(cols=c(subj)) %>%
+  unnest(cols=c(meth)) %>%
+  unnest(cols=c(scope)) 
+  
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj,meth,scope) %>%
+  summarize(.groups="drop",
+       n = length(unique(isbn)),
+       pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
+            ) %>%
+  DT::datatable (
+      data = .,
+      extensions = 'Buttons',
+      options = list(dom = 'Bfrltip',
+                     buttons = c('csv')),
+      caption ="subj x meth x scope frequencies"
+    )
+    
+coded_isbns_wide_unpacked.df %>%
+  group_by(subj) %>% 
+  mutate(subj_total = length(unique(isbn)))  %>%
+  group_by(subj,meth) %>%
+  summarize(.groups="drop",
+       n = length(unique(isbn)),
+       percent_of_subject = n/unique(subj_total),
+       pr_F= mean(distinct(data.frame(isbn,og_pr_F))[["og_pr_F"]], na.rm=TRUE   )
+            ) -> coded_subj_freq.df 
+
+coded_subj_freq.df %>%
+  mutate(display=glue::glue('{round(percent_of_subject,2)}% ({n})')) %>%
+  select(subj,meth,display) %>%
+  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
+  gt::gt() %>%
+  gt::tab_header("percentage of each subject employing methodology") %>%
+  gt::cols_label(subj="") %>%
+    gt::tab_caption("Categories are overlapping -- percentages may exceed 100%. Number of dissertations in category in parentheses. ")
+
+coded_subj_freq.df %>%
+  mutate(display=glue::glue('{round(pr_F,2)} ({n})')) %>%
+  select(subj,meth,display) %>%
+  pivot_wider(names_from=meth,values_from=display, values_fill="0") %>%
+  gt::gt() %>%
+  gt::tab_header("Female proportion by subject & method") %>%
+  gt::cols_label(subj="") %>% 
+  gt::tab_caption("Categories are overlapping. Number of dissertations in category in parentheses. ")
+
+```

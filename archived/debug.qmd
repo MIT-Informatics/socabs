@@ -1,0 +1,51 @@
+---
+title: "Untitled"
+format: html
+editor: visual
+---
+
+```{r}
+coded_isbns_wide_unpacked.df %>% 
+  filter(subj=="class") %>%
+  select(isbn) %>%
+  distinct()
+```
+
+```{r}
+exact_matches.df %>%
+  filter(topic=="subj:class") %>%
+  distinct()
+```
+
+```{r}
+coded_isbns.df %>% 
+  filter(topic=="subj:class") %>%
+  filter(value) %>%
+  count(coding_src)
+
+coded_isbns.df %>%
+  filter(topic=="subj:class") %>%
+  select(isbn) %>%
+  distinct()
+```
+
+```{r}
+coded_isbns_gender.df %>% 
+  filter(category=="class")
+```
+
+```{r}
+coded_isbns_wide.df %>%
+  filter(`subj:class`)
+```
+
+```{r}
+coded_isbns_wide_nest.df
+```
+
+```{r}
+coded_isbns_wide_unpacked.df %>%
+  filter(subj=="class") %>% 
+  select(isbn) %>%
+  distinct()
+```

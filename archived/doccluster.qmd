@@ -1,0 +1,160 @@
+---
+title: "Untitled"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(magrittr, include.only="%<>%")
+```
+
+```{r reduce-func}
+remove_sparse_tfidf<- function (tbl, 
+                                term, document, 
+                                f_min=.025, f_max=.975) {
+  rv <- tbl
+  ndoc <- tbl %>% pull({{document}}) %>% unique() %>% length() 
+  counts.df <- tbl %>% 
+    select({{term}}, {{document}}) %>%
+    distinct() %>%
+    group_by({{term}}) %>%
+    count() %>%
+    ungroup() %>%
+    mutate(rf = n/ndoc) %>%
+    filter(rf <= f_max, rf >=f_min)
+  rv %<>% semi_join(counts.df, by = join_by({{term}}))
+  rv
+}
+```
+
+```{r reduce-tfidf}
+
+reduced_tf.df <- remove_sparse_tfidf(combined_tf_idf_stemmed.df, ngram,isbn,.025,.975)
+
+reduced_tf.df %<>% filter(!is.na(isbn)) %>% left_join(by="isbn", 
+                diss_cleaned_plus_gender.df %>% select(Title,isbn))
+
+reduced_tf.df %<>% mutate(Title = as.factor(Title))
+```
+
+```{r doc-cluster-datastructures}
+
+### term frequency matrix formats
+
+system.time(tt_sparse.sm <- reduced_tf.df %>% 
+  tidytext::cast_sparse(isbn,ngram,n))
+
+print(object.size(tt_sparse.sm), units="Mb")
+
+
+# .2 sec, 8.3MB
+
+system.time(tt_dtm.m <- reduced_tf.df %>% 
+  tidytext::cast_dtm(isbn,ngram,n))
+
+print(object.size(tt_dtm.m), units="Mb")
+
+# .25 sec, 10.8MB
+
+### document similarity/distance  matrices
+
+# cosine similarity matrix
+system.time({sim_cosine_widyr.df <-  
+  reduced_tf.df %>% widyr::pairwise_similarity(Title, ngram,n) %>% 
+  arrange(desc(similarity))})
+
+print(object.size(sim_cosine_widyr.df), units="Mb")
+
+#  37 s / 921 MB
+
+# system.time({wid_distance.df <-  
+#   reduced_tf.df %>% widyr::pairwise_dist(Title, ngram,n) %>% 
+#   arrange(distance)})
+# 
+# print(object.size(wid_distance.df), units="Mb")
+
+#### out of memory error on defaults
+
+system.time({dist_euclid.dist <-  
+  tt_sparse.sm %>% dist(method="euclidean")})
+
+print(object.size(dist_euclid.dist), units="Mb")
+
+# 384 s / 231 MB
+
+system.time({dist_manhattan.dist <-  
+  tt_sparse.sm %>% dist(method="manhattan")})
+
+print(object.size(dist_manhattan.dist), units="Mb")
+# 603 s / 231 MB
+
+system.time({dist_euclid.dist <-  
+  tt_dtm.m %>% dist(method="euclidean")})
+
+print(object.size(dist_euclid.dist), units="Mb")
+
+# 467 s / 231 MB
+
+system.time({dist_manhattan.dist <-  
+  tt_dtm.m %>% dist(method="manhattan")})
+
+print(object.size(dist_manhattan.dist), units="Mb")
+
+# 502 s / 231 MB
+
+system.time({dist_euclidean_proxy <- tt_dtm.m %>% as.matrix() %>%
+  proxy::dist(x=.,method="Euclidean")}) 
+print(object.size(dist_euclidean_proxy), units="Mb")
+# 458s/231MB
+
+
+system.time({sim_cosine_proxy <- tt_dtm.m %>% as.matrix() %>%
+  proxy::simil(method="cosine")}) 
+print(object.size(sim_cosine_proxy), units="Mb")
+# 445s/231MB
+
+system.time({wid_distance.df <-  
+   reduced_tf.df %>% widyr::pairwise_dist(Title, ngram,n, sparse=TRUE) %>% 
+   arrange(distance)})
+print(object.size(wid_distance.df), units="Mb")
+
+# 512s/925MB
+```
+
+```{r checkpoint}
+save(combined_tf_idf_stemmed.df,
+           diss_cleaned_plus_gender.df,
+           reduced_tf.df,
+           sim_cosine_proxy,
+           dist_euclidean_proxy,
+           dist_manhattan.dist,
+           file="checkpoint_cluster.RData")
+           
+           
+          
+           
+```
+
+```{r cluster-analysis}
+
+load("checkpoint_cluster.RData")
+# 3 sec, 11 MB
+
+
+km.out <- kmeans(tt_dtm.m, centers=5)
+km.out <- kmeans(tt_sparse.sm, centers=10)
+
+# closest neighbors
+closest.ls <- FNN::get.knnx(tt_dtm.sm, km.out[["centers"]], 5)
+
+
+km.df <- tibble(cluster=km.out[["cluster"]], isbn =names(km.out[["cluster"]])) %>% 
+  left_join(by="isbn", diss_cleaned_plus_gender.df %>% select(Title,isbn))
+
+km.df %>% slice(as.vector(closest.ls[["nn.index"]]) %>% unique()) %>%
+  select(cluster,Title) %>% arrange(cluster,Title) %>% gt::gt()
+  
+
+as.vector(closest.ls[["nn.index"]])
+```
