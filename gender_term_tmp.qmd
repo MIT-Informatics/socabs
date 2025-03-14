@@ -188,7 +188,9 @@ names(dy.ls) <- dy.df %>% pull(year)
 ```
 
 # Author Characteristics
+
 ## Gender
+
 ```{r gender-coding}
 requireNamespace("opengender")
 
@@ -203,6 +205,7 @@ diss_cleaned_plus_gender.df %<>% opengender::add_gender_predictions(dict= "wgen2
 diss_cleaned_plus_gender.df %>% 
   summarize(opengender::gender_mean(og_details,simplify_output="row"))
 ```
+
 ```{r gender-trends}
 
 diss_cleaned_plus_gender.df %>% 
@@ -423,3 +426,24 @@ diss_au_id_tidy.df %>%
 rm(diss_au_id_tidy.df, stop_topics.df, lower_q, upper_q, popterms.ls)
 ```
 
+```{r}
+remove_sparse_tfidf<- function (tbl, 
+                                term, document, 
+                                f_min=.025, f_max=.975) {
+  rv <- tbl
+  ndoc <- tbl %>% pull({{document}}) %>% unique() %>% length() 
+  counts.df <- tbl %>% 
+    select({{term}}, {{document}}) %>%
+    distinct() %>%
+    group_by({{term}}) %>%
+    count() %>%
+    ungroup() %>%
+    mutate(rf = n/ndoc) %>%
+    filter(rf <= f_max, rf >=f_min)
+  rv %<>% semi_join(counts.df, by = join_by({{term}}))
+  rv
+}
+
+remove_sparse_tfidf(combined_tf_idf_stemmed.df, ngram,isbn,.5,.95)
+
+```
